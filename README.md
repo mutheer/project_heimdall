@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Heimdall AI Logo](https://www.developmentaid.org/files/organizationLogos/ministry-of-health-wellness-botswana-167881.jpg)
+![Heimdall AI Logo](https://i.ibb.co/8gZPy3d/logo.png)
 
 **AI-Powered Medical IoT Threat Detection System for Botswana Healthcare**
 

@@ -93,8 +93,8 @@ const Login: React.FC = () => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
           <img 
-            src="https://www.developmentaid.org/files/organizationLogos/ministry-of-health-wellness-botswana-167881.jpg"
-            alt="Ministry of Health Botswana"
+            src="https://i.ibb.co/8gZPy3d/logo.png"
+            alt="Heimdall AI Logo"
             className="h-16 w-auto"
           />
         </div>
