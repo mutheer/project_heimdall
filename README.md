@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Heimdall AI Logo](https://i.ibb.co/F4T8Qv0/heimdallai.png)
+![Heimdall AI Logo](/ChatGPT%20Image%20Jun%2016,%202025,%2012_28_31%20PM.png)
 
 **AI-Powered Medical IoT Threat Detection System for Botswana Healthcare**
 
