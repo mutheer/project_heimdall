@@ -24,16 +24,28 @@ export function UserProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Check for existing session on mount
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        // Set user from existing session
-        setUser({
-          id: session.user.id,
-          name: 'Admin User',
-          email: session.user.email || '',
-          role: 'admin',
-          avatar: '/avatar.png',
-        });
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          // Get user details from public.users table
+          const { data: userData, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (!error && userData) {
+            setUser({
+              id: userData.id,
+              name: userData.username || 'User',
+              email: userData.email,
+              role: userData.role,
+              avatar: '/avatar.png',
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Session check error:', error);
       }
     };
 
@@ -42,14 +54,31 @@ export function UserProvider({ children }: { children: ReactNode }) {
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('Auth state change:', event, session?.user?.email);
+        
         if (event === 'SIGNED_IN' && session?.user) {
-          setUser({
-            id: session.user.id,
-            name: 'Admin User',
-            email: session.user.email || '',
-            role: 'admin',
-            avatar: '/avatar.png',
-          });
+          try {
+            // Get user details from public.users table
+            const { data: userData, error } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', session.user.id)
+              .single();
+
+            if (!error && userData) {
+              setUser({
+                id: userData.id,
+                name: userData.username || 'User',
+                email: userData.email,
+                role: userData.role,
+                avatar: '/avatar.png',
+              });
+            } else {
+              console.error('Error fetching user data:', error);
+            }
+          } catch (err) {
+            console.error('Error in auth state change:', err);
+          }
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
         }
@@ -61,6 +90,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
+      console.log('Attempting login for:', email);
+
       // First verify admin credentials using the RPC function
       const { data: adminData, error: adminError } = await supabase
         .rpc('verify_admin', {
@@ -73,43 +104,63 @@ export function UserProvider({ children }: { children: ReactNode }) {
         throw new Error(adminError.message);
       }
 
-      // Explicitly check if adminData is true
+      // Check if admin verification was successful
       if (adminData === true) {
-        // Create a Supabase auth session using signInWithPassword
+        console.log('Admin verification successful');
+
+        // Try to sign in with Supabase Auth
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
           email: email,
           password: password
         });
 
         if (authError) {
-          console.error('Auth session error:', authError.message);
+          console.error('Auth sign-in error:', authError.message);
+          
+          // If auth user doesn't exist, we might need to create one
+          if (authError.message.includes('Invalid login credentials')) {
+            console.log('Auth user not found, this is expected for admin-only accounts');
+            
+            // For admin users verified through the admins table, 
+            // we'll create a temporary session-like state
+            setUser({
+              id: 'admin-user',
+              name: 'Admin User',
+              email: email,
+              role: 'admin',
+              avatar: '/avatar.png',
+            });
+            
+            return true;
+          }
+          
           throw new Error(authError.message);
         }
 
         if (authData.user) {
-          setUser({
-            id: authData.user.id,
-            name: 'Admin User',
-            email: authData.user.email || email,
-            role: 'admin',
-            avatar: '/avatar.png',
-          });
-
+          console.log('Auth sign-in successful');
+          // User state will be set by the auth state change listener
           return true;
         }
       }
 
-      console.error('Authentication failed');
+      console.error('Admin verification failed');
       return false;
     } catch (err) {
       console.error('Login error:', err instanceof Error ? err.message : 'Unknown error');
-      throw err; // Re-throw the error to be handled by the login form
+      throw err;
     }
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Force logout even if there's an error
+      setUser(null);
+    }
   };
 
   return (

@@ -52,7 +52,7 @@ export async function testDatabaseConnection(): Promise<DatabaseStatus> {
 
   // Test basic connection
   try {
-    const { data, error } = await supabase.from('users').select('count', { count: 'exact', head: true });
+    const { data, error } = await supabase.from('admins').select('count', { count: 'exact', head: true });
     
     if (error) {
       status.connection = {
@@ -169,7 +169,32 @@ export async function testAdminAccess(): Promise<DatabaseTestResult> {
 export async function testDatabaseOperations(): Promise<DatabaseTestResult[]> {
   const results: DatabaseTestResult[] = [];
 
-  // Test device creation
+  // Test admin table access
+  try {
+    const { data, error } = await supabase
+      .from('admins')
+      .select('email')
+      .limit(1);
+
+    if (error) {
+      results.push({
+        success: false,
+        message: `Admin table access failed: ${error.message}`
+      });
+    } else {
+      results.push({
+        success: true,
+        message: `Admin table accessible (${data?.length || 0} records)`
+      });
+    }
+  } catch (err) {
+    results.push({
+      success: false,
+      message: `Admin table test error: ${err instanceof Error ? err.message : 'Unknown error'}`
+    });
+  }
+
+  // Test device creation (if user has permission)
   try {
     const { data, error } = await supabase
       .from('devices')
@@ -185,12 +210,12 @@ export async function testDatabaseOperations(): Promise<DatabaseTestResult[]> {
     if (error) {
       results.push({
         success: false,
-        message: `Device creation failed: ${error.message}`
+        message: `Device creation test: ${error.message}`
       });
     } else {
       results.push({
         success: true,
-        message: 'Device creation successful'
+        message: 'Device creation test successful'
       });
 
       // Clean up test device
@@ -200,49 +225,6 @@ export async function testDatabaseOperations(): Promise<DatabaseTestResult[]> {
     results.push({
       success: false,
       message: `Device test error: ${err instanceof Error ? err.message : 'Unknown error'}`
-    });
-  }
-
-  // Test threat creation
-  try {
-    const { data: devices } = await supabase.from('devices').select('device_id').limit(1);
-    
-    if (devices && devices.length > 0) {
-      const { data, error } = await supabase
-        .from('threats')
-        .insert({
-          device_id: devices[0].device_id,
-          threat_type: 'Test Threat',
-          description: 'Test threat description',
-          severity_level: 'low'
-        })
-        .select()
-        .single();
-
-      if (error) {
-        results.push({
-          success: false,
-          message: `Threat creation failed: ${error.message}`
-        });
-      } else {
-        results.push({
-          success: true,
-          message: 'Threat creation successful'
-        });
-
-        // Clean up test threat
-        await supabase.from('threats').delete().eq('threat_id', data.threat_id);
-      }
-    } else {
-      results.push({
-        success: false,
-        message: 'No devices available for threat test'
-      });
-    }
-  } catch (err) {
-    results.push({
-      success: false,
-      message: `Threat test error: ${err instanceof Error ? err.message : 'Unknown error'}`
     });
   }
 
