@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { ShieldAlert, ShieldCheck, Cpu, AlertTriangle, Activity, Shield } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, Cpu, AlertTriangle, Activity, Shield, Database } from 'lucide-react';
 import ThreatCard from '../components/ThreatCard';
 import DeviceStatusCard from '../components/DeviceStatusCard';
+import DatabaseStatus from '../components/DatabaseStatus';
 import { api, Device, Threat } from '../services/api';
 
 const Dashboard: React.FC = () => {
@@ -10,6 +11,7 @@ const Dashboard: React.FC = () => {
   const [threats, setThreats] = useState<(Threat & { devices: { device_name: string } })[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDatabaseStatus, setShowDatabaseStatus] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -110,8 +112,23 @@ const Dashboard: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <div className="text-sm text-gray-500">Last updated: {new Date().toLocaleString()}</div>
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={() => setShowDatabaseStatus(true)}
+            className="flex items-center px-3 py-2 text-sm bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors"
+          >
+            <Database className="h-4 w-4 mr-2" />
+            Database Status
+          </button>
+          <div className="text-sm text-gray-500">Last updated: {new Date().toLocaleString()}</div>
+        </div>
       </div>
+
+      {/* Database Status Modal */}
+      <DatabaseStatus 
+        isOpen={showDatabaseStatus} 
+        onClose={() => setShowDatabaseStatus(false)} 
+      />
 
       {/* Stats row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
