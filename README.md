@@ -267,8 +267,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Built with ❤️ for Healthcare Security in Botswana**
-
-[Website](https://heimdall-ai.com) • [Documentation](https://docs.heimdall-ai.com) • [Community](https://community.heimdall-ai.com)
-
-</div>
