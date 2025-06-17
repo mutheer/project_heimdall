@@ -31,7 +31,7 @@ const Header: React.FC<HeaderProps> = ({ sidebarOpen, setSidebarOpen }) => {
             </button>
             <div className="ml-4 md:ml-0 flex items-center">
               <img 
-                src="https://i.ibb.co/8gZPy3d/logo.png"
+                src="https://i.ibb.co/F4T8Qv0/heimdallai.png"
                 alt="Heimdall AI Logo"
                 className="h-8 w-auto mr-2"
               />
