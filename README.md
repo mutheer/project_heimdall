@@ -56,8 +56,6 @@ To safeguard Botswana's healthcare infrastructure by providing real-time threat 
 
 ### 👥 **Role-Based Access Control**
 - **Admin**: Full system access and user management
-- **Analyst**: Threat analysis and device monitoring
-- **Viewer**: Read-only access to dashboards and reports
 
 ## 🏗️ Architecture
 
@@ -232,24 +230,6 @@ npm run db:reset     # Reset database with migrations
 npm run db:seed      # Seed database with sample data
 ```
 
-### Contributing
-
-1. **Fork the Repository**
-2. **Create a Feature Branch**
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-3. **Commit Your Changes**
-   ```bash
-   git commit -m 'Add amazing feature'
-   ```
-4. **Push to Branch**
-   ```bash
-   git push origin feature/amazing-feature
-   ```
-5. **Open a Pull Request**
-
-## 🔒 Security & Compliance
 
 ### Security Features
 
@@ -268,77 +248,11 @@ npm run db:seed      # Seed database with sample data
 
 ## 📊 Performance & Monitoring
 
-### System Metrics
-
-- **Real-time Processing**: < 100ms threat detection latency
-- **Scalability**: Supports 10,000+ concurrent devices
-- **Uptime**: 99.9% availability SLA
-- **Data Retention**: Configurable (30-365 days)
-
-### Monitoring & Alerting
-
-- **Application Performance Monitoring (APM)**
-- **Database Performance Tracking**
-- **Real-time Error Tracking**
-- **Custom Alert Configurations**
-
-## 🌍 Deployment
-
-### Production Deployment
-
-1. **Build the Application**
-   ```bash
-   npm run build
-   ```
-
-2. **Deploy to Hosting Platform**
-   - **Vercel** (Recommended)
-   - **Netlify**
-   - **AWS S3 + CloudFront**
-   - **Azure Static Web Apps**
-
-3. **Configure Environment Variables**
-   - Set production Supabase credentials
-   - Configure API endpoints
-   - Set up monitoring and logging
-
-### Docker Deployment
-
-```dockerfile
-# Dockerfile included for containerized deployment
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "start"]
-```
-
-## 🤝 Support & Community
-
-### Getting Help
-
-- **Documentation**: [docs.heimdall-ai.com](https://docs.heimdall-ai.com)
-- **Community Forum**: [community.heimdall-ai.com](https://community.heimdall-ai.com)
-- **Issue Tracker**: [GitHub Issues](https://github.com/your-org/heimdall-ai-healthcare/issues)
-- **Email Support**: support@heimdall-ai.com
-
-### Community Guidelines
-
-We welcome contributions from the healthcare technology community. Please read our [Code of Conduct](CODE_OF_CONDUCT.md) and [Contributing Guidelines](CONTRIBUTING.md) before participating.
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-
-- **Ministry of Health & Wellness, Botswana** - For their vision and support
-- **Healthcare Technology Community** - For continuous feedback and contributions
-- **Open Source Contributors** - For making this project possible
-- **Supabase Team** - For providing an excellent backend platform
 
 ## 📈 Roadmap
 
@@ -350,14 +264,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Multi-language Support** - Localization for regional healthcare systems
 - **Predictive Analytics** - Proactive threat prevention and device maintenance
 
-### Version History
-
-- **v1.0.0** - Initial release with core threat detection
-- **v1.1.0** - External system integration
-- **v1.2.0** - Advanced reporting and analytics
-- **v2.0.0** - AI-powered threat analysis (Current)
-
----
 
 <div align="center">
 
