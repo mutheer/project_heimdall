@@ -12,6 +12,7 @@ interface User {
 interface UserContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<boolean>;
+  signup: (email: string, password: string, username?: string, role?: string) => Promise<boolean>;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -27,22 +28,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          // Get user details from public.users table
-          const { data: userData, error } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-
-          if (!error && userData) {
-            setUser({
-              id: userData.id,
-              name: userData.username || 'User',
-              email: userData.email,
-              role: userData.role,
-              avatar: '/avatar.png',
-            });
-          }
+          await loadUserProfile(session.user.email!);
         }
       } catch (error) {
         console.error('Session check error:', error);
@@ -57,28 +43,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         console.log('Auth state change:', event, session?.user?.email);
         
         if (event === 'SIGNED_IN' && session?.user) {
-          try {
-            // Get user details from public.users table
-            const { data: userData, error } = await supabase
-              .from('users')
-              .select('*')
-              .eq('id', session.user.id)
-              .single();
-
-            if (!error && userData) {
-              setUser({
-                id: userData.id,
-                name: userData.username || 'User',
-                email: userData.email,
-                role: userData.role,
-                avatar: '/avatar.png',
-              });
-            } else {
-              console.error('Error fetching user data:', error);
-            }
-          } catch (err) {
-            console.error('Error in auth state change:', err);
-          }
+          await loadUserProfile(session.user.email!);
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
         }
@@ -87,6 +52,65 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  const loadUserProfile = async (email: string) => {
+    try {
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+      if (!error && userData) {
+        setUser({
+          id: userData.id,
+          name: userData.username || 'User',
+          email: userData.email,
+          role: userData.role,
+          avatar: '/avatar.png',
+        });
+      } else {
+        console.error('Error fetching user data:', error);
+      }
+    } catch (err) {
+      console.error('Error loading user profile:', err);
+    }
+  };
+
+  const signup = async (email: string, password: string, username?: string, role: string = 'viewer'): Promise<boolean> => {
+    try {
+      console.log('Attempting signup for:', email);
+
+      // Sign up with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          data: {
+            username: username || email.split('@')[0],
+            role: role
+          }
+        }
+      });
+
+      if (authError) {
+        console.error('Auth signup error:', authError.message);
+        throw new Error(authError.message);
+      }
+
+      if (authData.user) {
+        console.log('Signup successful');
+        // The trigger will handle creating the user profile
+        // If email confirmation is disabled, the user will be signed in automatically
+        return true;
+      }
+
+      throw new Error('Signup failed: No user returned');
+    } catch (err) {
+      console.error('Signup error:', err instanceof Error ? err.message : 'Unknown error');
+      throw err;
+    }
+  };
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
@@ -128,7 +152,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <UserContext.Provider value={{ user, login, logout, isAuthenticated: !!user }}>
+    <UserContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user }}>
       {children}
     </UserContext.Provider>
   );

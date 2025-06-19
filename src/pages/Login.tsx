@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, UserPlus } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 
 interface Message {
@@ -14,9 +14,11 @@ const Login: React.FC = () => {
   const [currentInput, setCurrentInput] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [step, setStep] = useState<'email' | 'password'>('email');
-  const { login } = useUser();
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [step, setStep] = useState<'email' | 'password' | 'username'>('email');
+  const { login, signup } = useUser();
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
@@ -30,7 +32,7 @@ const Login: React.FC = () => {
       let currentText = '';
       
       for (let i = 0; i < chars.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 30)); // Adjust typing speed here
+        await new Promise(resolve => setTimeout(resolve, 30));
         currentText += chars[i];
         setMessages(prev => 
           prev.map((msg, index) => 
@@ -53,7 +55,7 @@ const Login: React.FC = () => {
 
   useEffect(() => {
     // Initial greeting
-    addMessageWithTypingEffect("Hello! I'm your AI assistant HeimdallAI. To get started, please enter your email address.");
+    addMessageWithTypingEffect("Hello! I'm your AI assistant HeimdallAI. Would you like to login or create a new account?");
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -63,29 +65,81 @@ const Login: React.FC = () => {
     await addMessageWithTypingEffect(currentInput, 'user');
     setIsLoading(true);
 
-    if (step === 'email') {
-      setEmail(currentInput);
-      await addMessageWithTypingEffect("Great! Now, please enter your password for authentication.");
-      setStep('password');
-    } else {
-      setPassword(currentInput);
-      try {
-        const success = await login(email, currentInput);
-        if (success) {
-          await addMessageWithTypingEffect("Perfect! You're now logged in. I'll take you to your dashboard.");
-          setTimeout(() => navigate(from, { replace: true }), 1500);
+    try {
+      if (step === 'email') {
+        setEmail(currentInput);
+        if (mode === 'login') {
+          await addMessageWithTypingEffect("Great! Now, please enter your password for authentication.");
+          setStep('password');
         } else {
-          await addMessageWithTypingEffect("I'm sorry, but those credentials don't seem to be correct. Let's try again with your email.");
-          setStep('email');
+          await addMessageWithTypingEffect("Perfect! Now, please choose a username for your account.");
+          setStep('username');
         }
-      } catch (err) {
-        await addMessageWithTypingEffect("I apologize, but there was an error during login. Let's start over with your email.");
-        setStep('email');
+      } else if (step === 'username' && mode === 'signup') {
+        setUsername(currentInput);
+        await addMessageWithTypingEffect("Excellent! Now, please create a secure password for your account.");
+        setStep('password');
+      } else if (step === 'password') {
+        setPassword(currentInput);
+        
+        if (mode === 'login') {
+          const success = await login(email, currentInput);
+          if (success) {
+            await addMessageWithTypingEffect("Perfect! You're now logged in. I'll take you to your dashboard.");
+            setTimeout(() => navigate(from, { replace: true }), 1500);
+          } else {
+            await addMessageWithTypingEffect("I'm sorry, but those credentials don't seem to be correct. Let's try again with your email.");
+            setStep('email');
+            setEmail('');
+            setPassword('');
+          }
+        } else {
+          const success = await signup(email, currentInput, username);
+          if (success) {
+            await addMessageWithTypingEffect("Congratulations! Your account has been created successfully. You're now logged in!");
+            setTimeout(() => navigate(from, { replace: true }), 1500);
+          } else {
+            await addMessageWithTypingEffect("I apologize, but there was an issue creating your account. Let's start over.");
+            setStep('email');
+            setEmail('');
+            setPassword('');
+            setUsername('');
+          }
+        }
       }
+    } catch (err) {
+      await addMessageWithTypingEffect("I apologize, but there was an error. Let's start over with your email.");
+      setStep('email');
+      setEmail('');
+      setPassword('');
+      setUsername('');
     }
 
     setCurrentInput('');
     setIsLoading(false);
+  };
+
+  const switchMode = async () => {
+    const newMode = mode === 'login' ? 'signup' : 'login';
+    setMode(newMode);
+    setStep('email');
+    setEmail('');
+    setPassword('');
+    setUsername('');
+    setCurrentInput('');
+    
+    if (newMode === 'signup') {
+      await addMessageWithTypingEffect("Great! Let's create a new account for you. Please enter your email address.");
+    } else {
+      await addMessageWithTypingEffect("Welcome back! Please enter your email address to login.");
+    }
+  };
+
+  const getPlaceholder = () => {
+    if (step === 'email') return "Enter your email";
+    if (step === 'username') return "Choose a username";
+    if (step === 'password') return mode === 'signup' ? "Create a password" : "Enter your password";
+    return "";
   };
 
   return (
@@ -138,11 +192,11 @@ const Login: React.FC = () => {
             <div>
               <div className="mt-1 relative rounded-md shadow-sm">
                 <input
-                  type={step === 'password' ? 'password' : 'text'}
+                  type={step === 'password' ? 'password' : step === 'email' ? 'email' : 'text'}
                   value={currentInput}
                   onChange={(e) => setCurrentInput(e.target.value)}
                   className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                  placeholder={step === 'email' ? "Enter your email" : "Enter your password"}
+                  placeholder={getPlaceholder()}
                   disabled={isLoading}
                 />
               </div>
@@ -169,15 +223,49 @@ const Login: React.FC = () => {
                 <div className="w-full border-t border-gray-300" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Default Credentials</span>
+                <span className="px-2 bg-white text-gray-500">
+                  {mode === 'login' ? 'Need an account?' : 'Already have an account?'}
+                </span>
               </div>
             </div>
 
-            <div className="mt-4 text-sm text-center text-gray-600">
-              <p>Email: mudhirabu@gmail.com</p>
-              <p>Password: admin123</p>
+            <div className="mt-4">
+              <button
+                onClick={switchMode}
+                className="w-full flex justify-center items-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              >
+                {mode === 'login' ? (
+                  <>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Create Account
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="h-4 w-4 mr-2" />
+                    Login Instead
+                  </>
+                )}
+              </button>
             </div>
           </div>
+
+          {mode === 'login' && (
+            <div className="mt-6">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300" />
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">Default Admin Credentials</span>
+                </div>
+              </div>
+
+              <div className="mt-4 text-sm text-center text-gray-600">
+                <p>Email: mudhirabu@gmail.com</p>
+                <p>Password: admin123</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
