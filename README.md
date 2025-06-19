@@ -126,7 +126,7 @@ To safeguard Botswana's healthcare infrastructure by providing real-time threat 
    - Open [http://localhost:5173](http://localhost:5173)
    - Login with default credentials:
      - **Email**: `mudhirabu@gmail.com`
-     - **Password**: `admin`
+     - **Password**: `admin123`
 
 ## 📱 Usage Guide
 
@@ -266,4 +266,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 
 <div align="center">
-

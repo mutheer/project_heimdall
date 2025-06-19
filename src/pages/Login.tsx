@@ -175,7 +175,7 @@ const Login: React.FC = () => {
 
             <div className="mt-4 text-sm text-center text-gray-600">
               <p>Email: mudhirabu@gmail.com</p>
-              <p>Password: admin</p>
+              <p>Password: admin123</p>
             </div>
           </div>
         </div>

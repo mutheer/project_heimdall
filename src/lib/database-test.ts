@@ -142,7 +142,7 @@ export async function testAdminAccess(): Promise<DatabaseTestResult> {
     // Test admin verification function
     const { data, error } = await supabase.rpc('verify_admin', {
       email_input: 'mudhirabu@gmail.com',
-      password_input: 'admin'
+      password_input: 'admin123'
     });
 
     if (error) {
