@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Server, Activity, AlertCircle, Check, Copy, Code, Settings, RefreshCw, X, Plus, Clock, AlertTriangle, Shield } from 'lucide-react';
+import { Server, Activity, AlertCircle, Check, Copy, Code, Settings, RefreshCw, X, Plus, Clock, AlertTriangle, Shield, Database, Link } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 
@@ -33,6 +33,8 @@ const ExternalSystems: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [newSystem, setNewSystem] = useState({
     name: '',
     type: 'Medical Device',
@@ -139,6 +141,34 @@ const ExternalSystems: React.FC = () => {
       setSystemLogs([]);
     } finally {
       setLogsLoading(false);
+    }
+  };
+
+  const testConnection = async () => {
+    if (!newSystem.url || !newSystem.anon_key) {
+      setConnectionTestResult({
+        success: false,
+        message: 'Please enter both URL and API key'
+      });
+      return;
+    }
+
+    setTestingConnection(true);
+    setConnectionTestResult(null);
+
+    try {
+      const validation = await validateExternalSystem(newSystem.url, newSystem.anon_key);
+      setConnectionTestResult({
+        success: validation.valid,
+        message: validation.valid ? 'Connection successful! System logs table found.' : validation.error || 'Connection failed'
+      });
+    } catch (err: any) {
+      setConnectionTestResult({
+        success: false,
+        message: err.message || 'Connection test failed'
+      });
+    } finally {
+      setTestingConnection(false);
     }
   };
 
@@ -334,6 +364,7 @@ const ExternalSystems: React.FC = () => {
         anon_key: '',
         status: 'active'
       });
+      setConnectionTestResult(null);
     } catch (err: any) {
       console.error('Error adding system:', err);
       setError(err.message || 'Failed to add system. Please check the configuration and try again.');
@@ -380,13 +411,16 @@ const ExternalSystems: React.FC = () => {
           className="flex items-center justify-center px-4 py-2 bg-primary-600 text-white rounded-md shadow-sm hover:bg-primary-700 transition-colors"
         >
           <Plus className="h-5 w-5 mr-2" />
-          <span>Add New System</span>
+          <span>Connect External System</span>
         </button>
       </div>
 
       {/* Integration Key Section */}
       <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-        <h2 className="text-lg font-medium text-gray-900 mb-4">Integration Key</h2>
+        <h2 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+          <Database className="h-5 w-5 mr-2" />
+          Integration Key
+        </h2>
         <div className="bg-gray-50 p-4 rounded-md">
           <div className="flex items-center justify-between">
             <code className="text-sm">{integrationKey || 'No integration key found'}</code>
@@ -411,12 +445,24 @@ const ExternalSystems: React.FC = () => {
       {/* Add System Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Add New System</h2>
+              <h2 className="text-xl font-semibold flex items-center">
+                <Link className="h-6 w-6 mr-2" />
+                Connect External Supabase Database
+              </h2>
               <button onClick={() => setShowAddModal(false)} className="text-gray-500 hover:text-gray-700">
                 <X className="h-6 w-6" />
               </button>
+            </div>
+
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
+              <h3 className="text-sm font-medium text-blue-900 mb-2">📋 Prerequisites</h3>
+              <ul className="text-sm text-blue-700 space-y-1">
+                <li>• Your external Supabase project must have a <code className="bg-blue-100 px-1 rounded">system_logs</code> table</li>
+                <li>• The API key must have read access to the <code className="bg-blue-100 px-1 rounded">system_logs</code> table</li>
+                <li>• The system_logs table should contain: <code className="bg-blue-100 px-1 rounded">id, event_type, created_at, details</code></li>
+              </ul>
             </div>
 
             <form onSubmit={handleAddSystem}>
@@ -449,12 +495,13 @@ const ExternalSystems: React.FC = () => {
                     <option value="Diagnostic">Diagnostic System</option>
                     <option value="Laboratory">Laboratory Equipment</option>
                     <option value="Monitoring">Monitoring System</option>
+                    <option value="Database">External Database</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    System URL *
+                    Supabase Project URL *
                   </label>
                   <input
                     type="url"
@@ -462,13 +509,16 @@ const ExternalSystems: React.FC = () => {
                     value={newSystem.url}
                     onChange={(e) => setNewSystem({ ...newSystem, url: e.target.value })}
                     className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                    placeholder="https://api.example.com"
+                    placeholder="https://your-project.supabase.co"
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Find this in your Supabase project settings under "API" → "Project URL"
+                  </p>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    API Key *
+                    Supabase Anon Key *
                   </label>
                   <input
                     type="text"
@@ -476,24 +526,52 @@ const ExternalSystems: React.FC = () => {
                     value={newSystem.anon_key}
                     onChange={(e) => setNewSystem({ ...newSystem, anon_key: e.target.value })}
                     className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                    placeholder="Enter system API key"
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Find this in your Supabase project settings under "API" → "Project API keys" → "anon public"
+                  </p>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Status *
-                  </label>
-                  <select
-                    required
-                    value={newSystem.status}
-                    onChange={(e) => setNewSystem({ ...newSystem, status: e.target.value as 'active' | 'inactive' | 'error' })}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                    <option value="error">Error</option>
-                  </select>
+                {/* Connection Test */}
+                <div className="border-t pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-medium text-gray-900">Test Connection</h3>
+                    <button
+                      type="button"
+                      onClick={testConnection}
+                      disabled={testingConnection || !newSystem.url || !newSystem.anon_key}
+                      className="flex items-center px-3 py-1 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {testingConnection ? (
+                        <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Database className="h-4 w-4 mr-1" />
+                      )}
+                      Test Connection
+                    </button>
+                  </div>
+
+                  {connectionTestResult && (
+                    <div className={`p-3 rounded-md ${
+                      connectionTestResult.success 
+                        ? 'bg-success-50 border border-success-200' 
+                        : 'bg-danger-50 border border-danger-200'
+                    }`}>
+                      <div className="flex items-center">
+                        {connectionTestResult.success ? (
+                          <Check className="h-5 w-5 text-success-500 mr-2" />
+                        ) : (
+                          <AlertCircle className="h-5 w-5 text-danger-500 mr-2" />
+                        )}
+                        <span className={`text-sm ${
+                          connectionTestResult.success ? 'text-success-700' : 'text-danger-700'
+                        }`}>
+                          {connectionTestResult.message}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -505,7 +583,7 @@ const ExternalSystems: React.FC = () => {
                     onChange={(e) => setNewSystem({ ...newSystem, description: e.target.value })}
                     rows={3}
                     className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                    placeholder="Brief description of the system"
+                    placeholder="Brief description of the system and its purpose"
                   />
                 </div>
               </div>
@@ -528,9 +606,9 @@ const ExternalSystems: React.FC = () => {
                 <button
                   type="submit"
                   className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50"
-                  disabled={loading}
+                  disabled={loading || !connectionTestResult?.success}
                 >
-                  {loading ? 'Adding...' : 'Add System'}
+                  {loading ? 'Connecting...' : 'Connect System'}
                 </button>
               </div>
             </form>
@@ -569,7 +647,7 @@ const ExternalSystems: React.FC = () => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
           >
-            API Documentation
+            Integration Guide
           </button>
         </nav>
       </div>
@@ -610,10 +688,29 @@ const ExternalSystems: React.FC = () => {
 
                   <div className="mt-6 space-y-4">
                     <div>
+                      <label className="text-xs font-medium text-gray-500">Project URL</label>
+                      <div className="mt-1 flex items-center">
+                        <code className="text-sm bg-gray-50 px-3 py-1 rounded-md flex-1 truncate">
+                          {system.url}
+                        </code>
+                        <button
+                          onClick={() => copyApiKey(system.url)}
+                          className="ml-2 p-1 text-gray-400 hover:text-gray-600"
+                        >
+                          {copiedKey === system.url ? (
+                            <Check className="h-5 w-5 text-success-500" />
+                          ) : (
+                            <Copy className="h-5 w-5" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
                       <label className="text-xs font-medium text-gray-500">API Key</label>
                       <div className="mt-1 flex items-center">
                         <code className="text-sm bg-gray-50 px-3 py-1 rounded-md flex-1">
-                          {system.anon_key}
+                          {system.anon_key.substring(0, 20)}...
                         </code>
                         <button
                           onClick={() => copyApiKey(system.anon_key)}
@@ -774,20 +871,17 @@ const ExternalSystems: React.FC = () => {
         <div className="space-y-6">
           <div className="bg-white shadow-sm rounded-lg overflow-hidden">
             <div className="p-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-4">Integration Guide</h2>
+              <h2 className="text-lg font-medium text-gray-900 mb-4">External System Integration Guide</h2>
               
               <div className="prose max-w-none">
-                <h3 className="text-base font-medium text-gray-900">Authentication</h3>
+                <h3 className="text-base font-medium text-gray-900">🔗 Connecting Your Supabase Database</h3>
                 <p className="text-gray-600 mb-4">
-                  All API requests must include your integration key in the X-Integration-Key header:
+                  To connect your external Supabase database, you'll need to ensure it has the required table structure and proper access permissions.
                 </p>
-                <pre className="bg-gray-50 p-4 rounded-md overflow-x-auto">
-                  <code>X-Integration-Key: {integrationKey || '[Your Integration Key]'}</code>
-                </pre>
 
-                <h3 className="text-base font-medium text-gray-900 mt-6">System Logs</h3>
+                <h4 className="text-sm font-medium text-gray-900 mt-6">📋 Required Table Schema</h4>
                 <p className="text-gray-600 mb-4">
-                  Your system should maintain a system_logs table with the following schema:
+                  Your external Supabase project must have a <code className="bg-gray-100 px-1 rounded">system_logs</code> table with the following structure:
                 </p>
                 <pre className="bg-gray-50 p-4 rounded-md overflow-x-auto">
                   <code>{`CREATE TABLE system_logs (
@@ -795,20 +889,76 @@ const ExternalSystems: React.FC = () => {
   event_type text NOT NULL,
   created_at timestamptz DEFAULT now(),
   details jsonb NOT NULL
-);`}</code>
+);
+
+-- Optional: Add index for better performance
+CREATE INDEX system_logs_created_at_idx ON system_logs(created_at DESC);`}</code>
                 </pre>
 
-                <h3 className="text-base font-medium text-gray-900 mt-6">Response Format</h3>
+                <h4 className="text-sm font-medium text-gray-900 mt-6">🔑 API Key Requirements</h4>
                 <p className="text-gray-600 mb-4">
-                  The API will respond with a JSON object containing the processing results:
+                  The API key you provide must have at least <strong>read access</strong> to the <code className="bg-gray-100 px-1 rounded">system_logs</code> table. You can use either:
+                </p>
+                <ul className="list-disc list-inside text-gray-600 mb-4 space-y-1">
+                  <li><strong>Anon Key</strong>: If your table has proper RLS policies allowing public read access</li>
+                  <li><strong>Service Role Key</strong>: For full access (use with caution)</li>
+                </ul>
+
+                <h4 className="text-sm font-medium text-gray-900 mt-6">🛡️ Row Level Security (RLS)</h4>
+                <p className="text-gray-600 mb-4">
+                  If using the anon key, ensure your <code className="bg-gray-100 px-1 rounded">system_logs</code> table has appropriate RLS policies:
+                </p>
+                <pre className="bg-gray-50 p-4 rounded-md overflow-x-auto">
+                  <code>{`-- Enable RLS
+ALTER TABLE system_logs ENABLE ROW LEVEL SECURITY;
+
+-- Allow public read access (adjust as needed)
+CREATE POLICY "Allow public read access"
+ON system_logs
+FOR SELECT
+TO public
+USING (true);`}</code>
+                </pre>
+
+                <h4 className="text-sm font-medium text-gray-900 mt-6">📊 Sample Data Format</h4>
+                <p className="text-gray-600 mb-4">
+                  Here's an example of how your system logs should be structured:
                 </p>
                 <pre className="bg-gray-50 p-4 rounded-md overflow-x-auto">
                   <code>{JSON.stringify({
-                    success: true,
-                    logs_count: 10,
-                    last_sync: new Date().toISOString()
+                    id: "123e4567-e89b-12d3-a456-426614174000",
+                    event_type: "user_login",
+                    created_at: "2025-01-15T10:30:00Z",
+                    details: {
+                      user_id: "user123",
+                      ip_address: "192.168.1.1",
+                      user_agent: "Mozilla/5.0...",
+                      success: true
+                    }
                   }, null, 2)}</code>
                 </pre>
+
+                <h4 className="text-sm font-medium text-gray-900 mt-6">🔄 Sync Process</h4>
+                <p className="text-gray-600 mb-4">
+                  Once connected, the system will:
+                </p>
+                <ol className="list-decimal list-inside text-gray-600 mb-4 space-y-1">
+                  <li>Validate the connection and table structure</li>
+                  <li>Fetch recent logs from your system_logs table</li>
+                  <li>Store them locally for analysis and monitoring</li>
+                  <li>Sync periodically to keep data up-to-date</li>
+                </ol>
+
+                <h4 className="text-sm font-medium text-gray-900 mt-6">🚨 Troubleshooting</h4>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                  <h5 className="text-sm font-medium text-yellow-800 mb-2">Common Issues:</h5>
+                  <ul className="text-sm text-yellow-700 space-y-1">
+                    <li><strong>Authentication failed:</strong> Check your API key and ensure it has the correct permissions</li>
+                    <li><strong>Table does not exist:</strong> Create the system_logs table with the required schema</li>
+                    <li><strong>Connection timeout:</strong> Verify your project URL and ensure the project is online</li>
+                    <li><strong>No data synced:</strong> Check RLS policies and ensure there are records in the table</li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
