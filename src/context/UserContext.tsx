@@ -92,27 +92,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     try {
       console.log('Attempting login for:', email);
 
-      // First verify admin credentials using the RPC function
-      const { data: adminData, error: adminError } = await supabase
-        .rpc('verify_admin', {
-          email_input: email,
-          password_input: password
-        });
-
-      if (adminError) {
-        console.error('Admin verification error:', adminError.message);
-        throw new Error('Invalid credentials');
-      }
-
-      // Check if admin verification was successful
-      if (adminData !== true) {
-        console.error('Admin verification failed');
-        throw new Error('Invalid credentials');
-      }
-
-      console.log('Admin verification successful');
-
-      // Check if user exists in auth.users
+      // Use Supabase's standard authentication flow
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email,
         password: password
@@ -120,61 +100,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
       if (authError) {
         console.error('Auth sign-in error:', authError.message);
-        
-        // If the auth user doesn't exist but admin verification passed,
-        // we need to create the auth user
-        if (authError.message.includes('Invalid login credentials')) {
-          console.log('Auth user not found, creating auth user...');
-          
-          // Get the admin record to use the same ID
-          const { data: adminRecord, error: adminFetchError } = await supabase
-            .from('admins')
-            .select('id')
-            .eq('email', email)
-            .single();
-
-          if (adminFetchError || !adminRecord) {
-            throw new Error('Admin record not found');
-          }
-
-          // Create auth user with the same ID as the admin record
-          const { data: signUpData, error: signUpError } = await supabase.auth.admin.createUser({
-            email: email,
-            password: password,
-            user_id: adminRecord.id,
-            email_confirm: true,
-            user_metadata: {
-              role: 'admin'
-            }
-          });
-
-          if (signUpError) {
-            console.error('Failed to create auth user:', signUpError.message);
-            throw new Error('Failed to create authentication session');
-          }
-
-          if (signUpData.user) {
-            console.log('Auth user created successfully');
-            
-            // Now try to sign in again
-            const { data: retryAuthData, error: retryAuthError } = await supabase.auth.signInWithPassword({
-              email: email,
-              password: password
-            });
-
-            if (retryAuthError) {
-              throw new Error('Authentication failed after user creation');
-            }
-
-            return true;
-          }
-        }
-        
-        throw new Error('Authentication failed');
+        throw new Error('Invalid login credentials');
       }
 
       if (authData.user) {
         console.log('Auth sign-in successful');
+        // The onAuthStateChange listener will handle setting the user state
         return true;
       }
 
