@@ -105,47 +105,62 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
 
       // Check if admin verification was successful
-      if (adminData === true) {
-        console.log('Admin verification successful');
-
-        // Try to sign in with Supabase Auth
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: email,
-          password: password
-        });
-
-        if (authError) {
-          console.error('Auth sign-in error:', authError.message);
-          
-          // If auth user doesn't exist, we might need to create one
-          if (authError.message.includes('Invalid login credentials')) {
-            console.log('Auth user not found, this is expected for admin-only accounts');
-            
-            // For admin users verified through the admins table, 
-            // we'll create a temporary session-like state
-            setUser({
-              id: 'admin-user',
-              name: 'Admin User',
-              email: email,
-              role: 'admin',
-              avatar: '/avatar.png',
-            });
-            
-            return true;
-          }
-          
-          throw new Error(authError.message);
-        }
-
-        if (authData.user) {
-          console.log('Auth sign-in successful');
-          // User state will be set by the auth state change listener
-          return true;
-        }
+      if (adminData !== true) {
+        console.error('Admin verification failed');
+        throw new Error('Invalid credentials');
       }
 
-      console.error('Admin verification failed');
-      return false;
+      console.log('Admin verification successful');
+
+      // Now try to sign in with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password
+      });
+
+      if (authError) {
+        console.error('Auth sign-in error:', authError.message);
+        
+        // If the auth user doesn't exist but admin verification passed,
+        // we need to create the auth user
+        if (authError.message.includes('Invalid login credentials')) {
+          console.log('Auth user not found, attempting to create auth user...');
+          
+          // Try to sign up the user (this will create them in auth.users)
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email: email,
+            password: password,
+            options: {
+              emailRedirectTo: undefined, // Disable email confirmation
+              data: {
+                role: 'admin'
+              }
+            }
+          });
+
+          if (signUpError) {
+            console.error('Sign up error:', signUpError.message);
+            throw new Error('Failed to create authentication session: ' + signUpError.message);
+          }
+
+          if (signUpData.user) {
+            console.log('Auth user created successfully');
+            
+            // The user state will be set by the auth state change listener
+            return true;
+          }
+        }
+        
+        throw new Error('Authentication failed: ' + authError.message);
+      }
+
+      if (authData.user) {
+        console.log('Auth sign-in successful');
+        // User state will be set by the auth state change listener
+        return true;
+      }
+
+      throw new Error('Authentication failed: No user returned');
     } catch (err) {
       console.error('Login error:', err instanceof Error ? err.message : 'Unknown error');
       throw err;
