@@ -20,6 +20,7 @@ interface SystemLog {
   created_at: string;
   details: any;
   system_id?: string;
+  external_systems?: { name: string };
 }
 
 const ExternalSystems: React.FC = () => {
@@ -97,6 +98,12 @@ const ExternalSystems: React.FC = () => {
       
       if (!logs || logs.length === 0) {
         console.log('No logs found for system:', systemId);
+        // Try to sync the system to get fresh logs
+        const system = systems.find(s => s.id === systemId);
+        if (system) {
+          console.log('Attempting to sync system to get fresh logs...');
+          await syncSystem(system, true); // Pass true to indicate this is a background sync
+        }
       }
     } catch (err: any) {
       console.error('Error fetching system logs:', err);
@@ -219,9 +226,12 @@ const ExternalSystems: React.FC = () => {
     }
   };
 
-  const syncSystem = async (system: ExternalSystem) => {
-    setSyncingSystemIds(prev => new Set([...prev, system.id]));
+  const syncSystem = async (system: ExternalSystem, isBackgroundSync: boolean = false) => {
+    if (!isBackgroundSync) {
+      setSyncingSystemIds(prev => new Set([...prev, system.id]));
+    }
     setError(null);
+    
     try {
       const validation = await validateExternalSystem(system.url, system.anon_key);
       if (!validation.valid) {
@@ -258,25 +268,33 @@ const ExternalSystems: React.FC = () => {
         throw new Error(data.error);
       }
 
+      console.log('Sync successful:', data);
+
       await fetchSystems();
       
-      // Refresh logs if we're viewing this system
-      if (selectedSystem === system.id) {
-        await fetchSystemLogs(system.id);
-      } else if (!selectedSystem) {
-        await fetchAllSystemLogs();
+      // Refresh logs if we're viewing this system or all systems
+      if (selectedTab === 'activity') {
+        if (selectedSystem === system.id) {
+          await fetchSystemLogs(system.id);
+        } else if (!selectedSystem) {
+          await fetchAllSystemLogs();
+        }
       }
       
       setError(null);
     } catch (err: any) {
       console.error('Error syncing system:', err);
-      setError(err.message || 'Failed to sync system. Please check the system configuration and try again.');
+      if (!isBackgroundSync) {
+        setError(err.message || 'Failed to sync system. Please check the system configuration and try again.');
+      }
     } finally {
-      setSyncingSystemIds(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(system.id);
-        return newSet;
-      });
+      if (!isBackgroundSync) {
+        setSyncingSystemIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(system.id);
+          return newSet;
+        });
+      }
     }
   };
 
@@ -828,7 +846,7 @@ const ExternalSystems: React.FC = () => {
                         </div>
                         {log.system_id && (
                           <p className="text-xs text-gray-500 mt-1">
-                            System: {systems.find(s => s.id === log.system_id)?.name || 'Unknown'}
+                            System: {systems.find(s => s.id === log.system_id)?.name || log.external_systems?.name || 'Unknown'}
                           </p>
                         )}
                         <div className="mt-1">
