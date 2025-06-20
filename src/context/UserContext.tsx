@@ -15,6 +15,7 @@ interface UserContextType {
   signup: (email: string, password: string, username?: string, role?: string) => Promise<boolean>;
   logout: () => void;
   isAuthenticated: boolean;
+  loading: boolean;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -24,29 +25,33 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing session on mount
+    let mounted = true;
+
     const checkSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          await loadUserProfile(session.user.email!);
+        if (session?.user && mounted) {
+          await loadUserProfile(session.user.email!, session.user.id);
         }
       } catch (error) {
         console.error('Session check error:', error);
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
     checkSession();
 
-    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!mounted) return;
+
         console.log('Auth state change:', event, session?.user?.email);
         
         if (event === 'SIGNED_IN' && session?.user) {
-          await loadUserProfile(session.user.email!);
+          await loadUserProfile(session.user.email!, session.user.id);
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
         }
@@ -54,12 +59,15 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const loadUserProfile = async (email: string) => {
+  const loadUserProfile = async (email: string, authId: string) => {
     try {
-      // First try to get user from users table
+      // Try to get user from users table
       const { data: userData, error } = await supabase
         .from('users')
         .select('*')
@@ -74,42 +82,40 @@ export function UserProvider({ children }: { children: ReactNode }) {
           role: userData.role,
           avatar: '/avatar.png',
         });
+      } else if (error?.code === 'PGRST116') {
+        // User doesn't exist, create one
+        await createUserProfile(email, authId);
       } else {
         console.error('Error fetching user data:', error);
-        // If user doesn't exist in users table, create one
-        if (error.code === 'PGRST116') {
-          await createUserProfile(email);
-        }
       }
     } catch (err) {
       console.error('Error loading user profile:', err);
     }
   };
 
-  const createUserProfile = async (email: string) => {
+  const createUserProfile = async (email: string, authId: string) => {
     try {
-      const { data: authUser } = await supabase.auth.getUser();
-      if (authUser.user) {
-        const { data, error } = await supabase
-          .from('users')
-          .insert({
-            id: authUser.user.id,
-            username: email.split('@')[0],
-            email: email,
-            role: 'viewer'
-          })
-          .select()
-          .single();
+      const role = email === 'mudhirabu@gmail.com' ? 'admin' : 'viewer';
+      
+      const { data, error } = await supabase
+        .from('users')
+        .insert({
+          id: authId,
+          username: email.split('@')[0],
+          email: email,
+          role: role
+        })
+        .select()
+        .single();
 
-        if (!error && data) {
-          setUser({
-            id: data.id,
-            name: data.username,
-            email: data.email,
-            role: data.role,
-            avatar: '/avatar.png',
-          });
-        }
+      if (!error && data) {
+        setUser({
+          id: data.id,
+          name: data.username,
+          email: data.email,
+          role: data.role,
+          avatar: '/avatar.png',
+        });
       }
     } catch (err) {
       console.error('Error creating user profile:', err);
@@ -121,7 +127,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
       console.log('Attempting signup for:', email);
       setLoading(true);
 
-      // Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email,
         password: password,
@@ -157,20 +162,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
       console.log('Attempting login for:', email);
       setLoading(true);
 
-      // Add timeout to prevent infinite loading
-      const loginPromise = supabase.auth.signInWithPassword({
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email,
         password: password
       });
-
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Login timeout')), 10000); // 10 second timeout
-      });
-
-      const { data: authData, error: authError } = await Promise.race([
-        loginPromise,
-        timeoutPromise
-      ]) as any;
 
       if (authError) {
         console.error('Auth sign-in error:', authError.message);
@@ -198,24 +193,14 @@ export function UserProvider({ children }: { children: ReactNode }) {
       setUser(null);
     } catch (error) {
       console.error('Logout error:', error);
-      // Force logout even if there's an error
       setUser(null);
     } finally {
       setLoading(false);
     }
   };
 
-  // Don't render children until we've checked the session
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-500">Loading...</div>
-      </div>
-    );
-  }
-
   return (
-    <UserContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user }}>
+    <UserContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user, loading }}>
       {children}
     </UserContext.Provider>
   );
