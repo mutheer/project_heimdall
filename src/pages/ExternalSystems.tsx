@@ -19,8 +19,8 @@ interface SystemLog {
   event_type: string;
   created_at: string;
   details: any;
-  system_id?: string;
-  external_systems?: { name: string };
+  user_id?: string;
+  timestamp?: string;
 }
 
 const ExternalSystems: React.FC = () => {
@@ -54,9 +54,9 @@ const ExternalSystems: React.FC = () => {
   useEffect(() => {
     if (selectedTab === 'activity') {
       if (selectedSystem) {
-        fetchSystemLogs(selectedSystem);
+        fetchExternalSystemLogs(selectedSystem);
       } else {
-        fetchAllSystemLogs();
+        fetchAllExternalSystemLogs();
       }
     }
   }, [selectedTab, selectedSystem]);
@@ -75,76 +75,117 @@ const ExternalSystems: React.FC = () => {
     }
   };
 
-  const fetchSystemLogs = async (systemId: string) => {
+  const fetchExternalSystemLogs = async (systemId: string) => {
     setLogsLoading(true);
     setError(null);
+    
     try {
-      console.log('Fetching logs for system:', systemId);
+      console.log('Fetching logs for external system:', systemId);
       
-      const { data: logs, error: logsError } = await supabase
+      // Find the system details
+      const system = systems.find(s => s.id === systemId);
+      if (!system) {
+        throw new Error('System not found');
+      }
+
+      console.log('Connecting to external system:', system.url);
+      
+      // Create client for external system
+      const externalSupabase = createClient(system.url, system.anon_key);
+      
+      // Fetch logs directly from external system's system_logs table
+      const { data: externalLogs, error: logsError } = await externalSupabase
         .from('system_logs')
         .select('*')
-        .eq('system_id', systemId)
         .order('created_at', { ascending: false })
         .limit(100);
 
       if (logsError) {
-        console.error('Error fetching system logs:', logsError);
-        throw logsError;
+        console.error('Error fetching logs from external system:', logsError);
+        throw new Error(`Failed to fetch logs from external system: ${logsError.message}`);
       }
 
-      console.log('Fetched logs:', logs);
-      setSystemLogs(logs || []);
+      console.log('Fetched logs from external system:', externalLogs?.length || 0);
       
-      if (!logs || logs.length === 0) {
-        console.log('No logs found for system:', systemId);
-        // Try to sync the system to get fresh logs
-        const system = systems.find(s => s.id === systemId);
-        if (system) {
-          console.log('Attempting to sync system to get fresh logs...');
-          await syncSystem(system, true); // Pass true to indicate this is a background sync
-        }
+      // Transform logs to match our interface
+      const transformedLogs: SystemLog[] = (externalLogs || []).map(log => ({
+        id: log.id,
+        event_type: log.event_type,
+        created_at: log.created_at,
+        details: log.details,
+        user_id: log.user_id,
+        timestamp: log.timestamp || log.created_at
+      }));
+
+      setSystemLogs(transformedLogs);
+      
+      if (transformedLogs.length === 0) {
+        console.log('No logs found in external system');
       }
     } catch (err: any) {
-      console.error('Error fetching system logs:', err);
-      setError(err.message || 'Failed to fetch system logs');
+      console.error('Error fetching external system logs:', err);
+      setError(err.message || 'Failed to fetch logs from external system');
       setSystemLogs([]);
     } finally {
       setLogsLoading(false);
     }
   };
 
-  const fetchAllSystemLogs = async () => {
+  const fetchAllExternalSystemLogs = async () => {
     setLogsLoading(true);
     setError(null);
+    
     try {
-      console.log('Fetching all system logs');
+      console.log('Fetching logs from all external systems');
       
-      const { data: logs, error: logsError } = await supabase
-        .from('system_logs')
-        .select(`
-          *,
-          external_systems!system_logs_system_id_fkey (
-            name
-          )
-        `)
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (logsError) {
-        console.error('Error fetching all system logs:', logsError);
-        throw logsError;
-      }
-
-      console.log('Fetched all logs:', logs);
-      setSystemLogs(logs || []);
+      const allLogs: (SystemLog & { system_name: string })[] = [];
       
-      if (!logs || logs.length === 0) {
-        console.log('No logs found in system_logs table');
+      // Fetch logs from each external system
+      for (const system of systems) {
+        try {
+          console.log(`Fetching logs from ${system.name}...`);
+          
+          const externalSupabase = createClient(system.url, system.anon_key);
+          
+          const { data: externalLogs, error: logsError } = await externalSupabase
+            .from('system_logs')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50); // Limit per system to avoid too much data
+
+          if (logsError) {
+            console.warn(`Failed to fetch logs from ${system.name}:`, logsError.message);
+            continue; // Skip this system and continue with others
+          }
+
+          // Transform and add system name
+          const transformedLogs = (externalLogs || []).map(log => ({
+            id: `${system.id}-${log.id}`, // Prefix with system ID to avoid conflicts
+            event_type: log.event_type,
+            created_at: log.created_at,
+            details: log.details,
+            user_id: log.user_id,
+            timestamp: log.timestamp || log.created_at,
+            system_name: system.name
+          }));
+
+          allLogs.push(...transformedLogs);
+          console.log(`Fetched ${transformedLogs.length} logs from ${system.name}`);
+        } catch (systemError) {
+          console.warn(`Error fetching logs from ${system.name}:`, systemError);
+          continue;
+        }
       }
+      
+      // Sort all logs by created_at
+      allLogs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      
+      setSystemLogs(allLogs);
+      console.log(`Total logs fetched: ${allLogs.length}`);
+      
     } catch (err: any) {
-      console.error('Error fetching all system logs:', err);
-      setError(err.message || 'Failed to fetch system logs');
+      console.error('Error fetching all external system logs:', err);
+      setError(err.message || 'Failed to fetch logs from external systems');
       setSystemLogs([]);
     } finally {
       setLogsLoading(false);
@@ -238,46 +279,23 @@ const ExternalSystems: React.FC = () => {
         throw new Error(validation.error);
       }
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('No active session found');
-      }
-
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/system-monitor`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'X-Integration-Key': integrationKey
-        },
-        body: JSON.stringify({
-          system_id: system.id,
-          url: system.url,
-          anon_key: system.anon_key
+      // Update system status to active since connection is working
+      await supabase
+        .from('external_systems')
+        .update({
+          last_sync: new Date().toISOString(),
+          status: 'active'
         })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      console.log('Sync successful:', data);
+        .eq('id', system.id);
 
       await fetchSystems();
       
       // Refresh logs if we're viewing this system or all systems
       if (selectedTab === 'activity') {
         if (selectedSystem === system.id) {
-          await fetchSystemLogs(system.id);
+          await fetchExternalSystemLogs(system.id);
         } else if (!selectedSystem) {
-          await fetchAllSystemLogs();
+          await fetchAllExternalSystemLogs();
         }
       }
       
@@ -287,6 +305,15 @@ const ExternalSystems: React.FC = () => {
       if (!isBackgroundSync) {
         setError(err.message || 'Failed to sync system. Please check the system configuration and try again.');
       }
+      
+      // Update system status to error
+      await supabase
+        .from('external_systems')
+        .update({
+          last_sync: new Date().toISOString(),
+          status: 'error'
+        })
+        .eq('id', system.id);
     } finally {
       if (!isBackgroundSync) {
         setSyncingSystemIds(prev => {
@@ -350,7 +377,9 @@ const ExternalSystems: React.FC = () => {
   };
 
   const copyApiKey = (key: string) => {
-    navigator.clipboard.writeText(key);
+    // Only copy first 20 characters for security
+    const maskedKey = key.substring(0, 20) + '...';
+    navigator.clipboard.writeText(maskedKey);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
   };
@@ -441,7 +470,7 @@ const ExternalSystems: React.FC = () => {
         </h2>
         <div className="bg-gray-50 p-4 rounded-md">
           <div className="flex items-center justify-between">
-            <code className="text-sm">{integrationKey || 'No integration key found'}</code>
+            <code className="text-sm">{integrationKey ? '••••••••••••••••••••' : 'No integration key found'}</code>
             <button
               onClick={() => copyApiKey(integrationKey)}
               className="p-2 text-gray-400 hover:text-gray-600"
@@ -539,7 +568,7 @@ const ExternalSystems: React.FC = () => {
                     Supabase Anon Key *
                   </label>
                   <input
-                    type="text"
+                    type="password"
                     required
                     value={newSystem.anon_key}
                     onChange={(e) => setNewSystem({ ...newSystem, anon_key: e.target.value })}
@@ -728,7 +757,7 @@ const ExternalSystems: React.FC = () => {
                       <label className="text-xs font-medium text-gray-500">API Key</label>
                       <div className="mt-1 flex items-center">
                         <code className="text-sm bg-gray-50 px-3 py-1 rounded-md flex-1">
-                          {system.anon_key.substring(0, 20)}...
+                          ••••••••••••••••••••
                         </code>
                         <button
                           onClick={() => copyApiKey(system.anon_key)}
@@ -806,7 +835,7 @@ const ExternalSystems: React.FC = () => {
                     ))}
                   </select>
                   <button
-                    onClick={() => selectedSystem ? fetchSystemLogs(selectedSystem) : fetchAllSystemLogs()}
+                    onClick={() => selectedSystem ? fetchExternalSystemLogs(selectedSystem) : fetchAllExternalSystemLogs()}
                     disabled={logsLoading}
                     className="flex items-center px-3 py-2 text-sm bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50"
                   >
@@ -844,9 +873,9 @@ const ExternalSystems: React.FC = () => {
                             {new Date(log.created_at).toLocaleString()}
                           </div>
                         </div>
-                        {log.system_id && (
+                        {(log as any).system_name && (
                           <p className="text-xs text-gray-500 mt-1">
-                            System: {systems.find(s => s.id === log.system_id)?.name || log.external_systems?.name || 'Unknown'}
+                            System: {(log as any).system_name}
                           </p>
                         )}
                         <div className="mt-1">
@@ -864,8 +893,8 @@ const ExternalSystems: React.FC = () => {
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No Activity Logs Found</h3>
                   <p className="text-sm text-gray-500 mb-4">
                     {selectedSystem 
-                      ? 'No activity logs found for the selected system. Try syncing the system to fetch the latest logs.'
-                      : 'No activity logs found in the system. Connect external systems and sync them to see activity logs here.'
+                      ? 'No activity logs found in the selected external system. The system may not have any logs yet or the system_logs table may be empty.'
+                      : 'No activity logs found in any connected external systems. Connect external systems and ensure they have data in their system_logs tables.'
                     }
                   </p>
                   {selectedSystem && (
@@ -906,7 +935,9 @@ const ExternalSystems: React.FC = () => {
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   event_type text NOT NULL,
   created_at timestamptz DEFAULT now(),
-  details jsonb NOT NULL
+  details jsonb NOT NULL,
+  user_id text,
+  timestamp timestamptz
 );
 
 -- Optional: Add index for better performance
@@ -956,15 +987,15 @@ USING (true);`}</code>
                   }, null, 2)}</code>
                 </pre>
 
-                <h4 className="text-sm font-medium text-gray-900 mt-6">🔄 Sync Process</h4>
+                <h4 className="text-sm font-medium text-gray-900 mt-6">🔄 How It Works</h4>
                 <p className="text-gray-600 mb-4">
                   Once connected, the system will:
                 </p>
                 <ol className="list-decimal list-inside text-gray-600 mb-4 space-y-1">
-                  <li>Validate the connection and table structure</li>
-                  <li>Fetch recent logs from your system_logs table</li>
-                  <li>Store them locally for analysis and monitoring</li>
-                  <li>Sync periodically to keep data up-to-date</li>
+                  <li>Connect directly to your external Supabase database</li>
+                  <li>Query the system_logs table in real-time</li>
+                  <li>Display logs without storing them locally</li>
+                  <li>Validate connection and table structure</li>
                 </ol>
 
                 <h4 className="text-sm font-medium text-gray-900 mt-6">🚨 Troubleshooting</h4>
@@ -974,7 +1005,7 @@ USING (true);`}</code>
                     <li><strong>Authentication failed:</strong> Check your API key and ensure it has the correct permissions</li>
                     <li><strong>Table does not exist:</strong> Create the system_logs table with the required schema</li>
                     <li><strong>Connection timeout:</strong> Verify your project URL and ensure the project is online</li>
-                    <li><strong>No data synced:</strong> Check RLS policies and ensure there are records in the table</li>
+                    <li><strong>No data displayed:</strong> Check RLS policies and ensure there are records in the table</li>
                   </ul>
                 </div>
               </div>
