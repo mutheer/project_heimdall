@@ -21,6 +21,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Check for existing session on mount
@@ -32,6 +33,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         }
       } catch (error) {
         console.error('Session check error:', error);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -47,6 +50,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
         }
+        setLoading(false);
       }
     );
 
@@ -55,6 +59,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const loadUserProfile = async (email: string) => {
     try {
+      // First try to get user from users table
       const { data: userData, error } = await supabase
         .from('users')
         .select('*')
@@ -71,15 +76,50 @@ export function UserProvider({ children }: { children: ReactNode }) {
         });
       } else {
         console.error('Error fetching user data:', error);
+        // If user doesn't exist in users table, create one
+        if (error.code === 'PGRST116') {
+          await createUserProfile(email);
+        }
       }
     } catch (err) {
       console.error('Error loading user profile:', err);
     }
   };
 
+  const createUserProfile = async (email: string) => {
+    try {
+      const { data: authUser } = await supabase.auth.getUser();
+      if (authUser.user) {
+        const { data, error } = await supabase
+          .from('users')
+          .insert({
+            id: authUser.user.id,
+            username: email.split('@')[0],
+            email: email,
+            role: 'viewer'
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          setUser({
+            id: data.id,
+            name: data.username,
+            email: data.email,
+            role: data.role,
+            avatar: '/avatar.png',
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Error creating user profile:', err);
+    }
+  };
+
   const signup = async (email: string, password: string, username?: string, role: string = 'viewer'): Promise<boolean> => {
     try {
       console.log('Attempting signup for:', email);
+      setLoading(true);
 
       // Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -100,8 +140,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
       if (authData.user) {
         console.log('Signup successful');
-        // The trigger will handle creating the user profile
-        // If email confirmation is disabled, the user will be signed in automatically
         return true;
       }
 
@@ -109,18 +147,30 @@ export function UserProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('Signup error:', err instanceof Error ? err.message : 'Unknown error');
       throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       console.log('Attempting login for:', email);
+      setLoading(true);
 
-      // Use Supabase's standard authentication flow
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      // Add timeout to prevent infinite loading
+      const loginPromise = supabase.auth.signInWithPassword({
         email: email,
         password: password
       });
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Login timeout')), 10000); // 10 second timeout
+      });
+
+      const { data: authData, error: authError } = await Promise.race([
+        loginPromise,
+        timeoutPromise
+      ]) as any;
 
       if (authError) {
         console.error('Auth sign-in error:', authError.message);
@@ -129,7 +179,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
       if (authData.user) {
         console.log('Auth sign-in successful');
-        // The onAuthStateChange listener will handle setting the user state
         return true;
       }
 
@@ -137,19 +186,33 @@ export function UserProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('Login error:', err instanceof Error ? err.message : 'Unknown error');
       throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
   const logout = async () => {
     try {
+      setLoading(true);
       await supabase.auth.signOut();
       setUser(null);
     } catch (error) {
       console.error('Logout error:', error);
       // Force logout even if there's an error
       setUser(null);
+    } finally {
+      setLoading(false);
     }
   };
+
+  // Don't render children until we've checked the session
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <UserContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user }}>
