@@ -15,115 +15,53 @@ interface UserContextType {
   signup: (email: string, password: string, username?: string, role?: string) => Promise<boolean>;
   logout: () => void;
   isAuthenticated: boolean;
-  loading: boolean;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let mounted = true;
-    let timeoutId: NodeJS.Timeout;
-
-    const initializeAuth = async () => {
+    // Check for existing session on mount
+    const checkSession = async () => {
       try {
-        // Set a timeout to prevent infinite loading
-        timeoutId = setTimeout(() => {
-          if (mounted) {
-            console.log('Auth initialization timeout, setting loading to false');
-            setLoading(false);
-          }
-        }, 5000);
-
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error('Session error:', error);
-          if (mounted) {
-            setLoading(false);
-          }
-          return;
-        }
-
-        if (session?.user && mounted) {
-          console.log('Found existing session for:', session.user.email);
-          await loadUserProfile(session.user.email!, session.user.id);
-        }
-        
-        if (mounted) {
-          clearTimeout(timeoutId);
-          setLoading(false);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await loadUserProfile(session.user.email!);
         }
       } catch (error) {
-        console.error('Auth initialization error:', error);
-        if (mounted) {
-          clearTimeout(timeoutId);
-          setLoading(false);
-        }
+        console.error('Session check error:', error);
       }
     };
 
-    initializeAuth();
+    checkSession();
 
-    // Set up auth state listener
+    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (!mounted) return;
-
         console.log('Auth state change:', event, session?.user?.email);
         
-        try {
-          if (event === 'SIGNED_IN' && session?.user) {
-            await loadUserProfile(session.user.email!, session.user.id);
-          } else if (event === 'SIGNED_OUT') {
-            setUser(null);
-          }
-        } catch (error) {
-          console.error('Auth state change error:', error);
-        }
-        
-        if (mounted) {
-          setLoading(false);
+        if (event === 'SIGNED_IN' && session?.user) {
+          await loadUserProfile(session.user.email!);
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
         }
       }
     );
 
-    return () => {
-      mounted = false;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
-  const loadUserProfile = async (email: string, authId: string) => {
+  const loadUserProfile = async (email: string) => {
     try {
-      console.log('Loading user profile for:', email);
-      
-      // For admin user, create a simple profile without database query
-      if (email === 'mudhirabu@gmail.com') {
-        setUser({
-          id: authId,
-          name: 'Admin User',
-          email: email,
-          role: 'admin',
-          avatar: '/avatar.png',
-        });
-        return;
-      }
-
-      // For other users, try to load from database
       const { data: userData, error } = await supabase
         .from('users')
         .select('*')
         .eq('email', email)
-        .maybeSingle();
+        .single();
 
-      if (userData) {
+      if (!error && userData) {
         setUser({
           id: userData.id,
           name: userData.username || 'User',
@@ -131,44 +69,19 @@ export function UserProvider({ children }: { children: ReactNode }) {
           role: userData.role,
           avatar: '/avatar.png',
         });
-      } else if (!error || error.code === 'PGRST116') {
-        // User doesn't exist, create a simple profile
-        setUser({
-          id: authId,
-          name: email.split('@')[0],
-          email: email,
-          role: 'viewer',
-          avatar: '/avatar.png',
-        });
       } else {
-        console.error('Error loading user profile:', error);
-        // Still set a basic user profile to prevent blocking
-        setUser({
-          id: authId,
-          name: email.split('@')[0],
-          email: email,
-          role: 'viewer',
-          avatar: '/avatar.png',
-        });
+        console.error('Error fetching user data:', error);
       }
     } catch (err) {
-      console.error('Error in loadUserProfile:', err);
-      // Set a basic user profile to prevent blocking
-      setUser({
-        id: authId,
-        name: email.split('@')[0],
-        email: email,
-        role: email === 'mudhirabu@gmail.com' ? 'admin' : 'viewer',
-        avatar: '/avatar.png',
-      });
+      console.error('Error loading user profile:', err);
     }
   };
 
   const signup = async (email: string, password: string, username?: string, role: string = 'viewer'): Promise<boolean> => {
     try {
       console.log('Attempting signup for:', email);
-      setLoading(true);
 
+      // Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email,
         password: password,
@@ -187,6 +100,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
       if (authData.user) {
         console.log('Signup successful');
+        // The trigger will handle creating the user profile
+        // If email confirmation is disabled, the user will be signed in automatically
         return true;
       }
 
@@ -194,16 +109,14 @@ export function UserProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('Signup error:', err instanceof Error ? err.message : 'Unknown error');
       throw err;
-    } finally {
-      setLoading(false);
     }
   };
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       console.log('Attempting login for:', email);
-      setLoading(true);
 
+      // Use Supabase's standard authentication flow
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email,
         password: password
@@ -216,6 +129,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
       if (authData.user) {
         console.log('Auth sign-in successful');
+        // The onAuthStateChange listener will handle setting the user state
         return true;
       }
 
@@ -223,26 +137,22 @@ export function UserProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('Login error:', err instanceof Error ? err.message : 'Unknown error');
       throw err;
-    } finally {
-      setLoading(false);
     }
   };
 
   const logout = async () => {
     try {
-      setLoading(true);
       await supabase.auth.signOut();
       setUser(null);
     } catch (error) {
       console.error('Logout error:', error);
+      // Force logout even if there's an error
       setUser(null);
-    } finally {
-      setLoading(false);
     }
   };
 
   return (
-    <UserContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user, loading }}>
+    <UserContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user }}>
       {children}
     </UserContext.Provider>
   );
