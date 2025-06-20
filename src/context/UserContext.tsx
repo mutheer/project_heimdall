@@ -26,55 +26,104 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let timeoutId: NodeJS.Timeout;
 
-    const checkSession = async () => {
+    const initializeAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        // Set a timeout to prevent infinite loading
+        timeoutId = setTimeout(() => {
+          if (mounted) {
+            console.log('Auth initialization timeout, setting loading to false');
+            setLoading(false);
+          }
+        }, 5000);
+
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('Session error:', error);
+          if (mounted) {
+            setLoading(false);
+          }
+          return;
+        }
+
         if (session?.user && mounted) {
+          console.log('Found existing session for:', session.user.email);
           await loadUserProfile(session.user.email!, session.user.id);
         }
-      } catch (error) {
-        console.error('Session check error:', error);
-      } finally {
+        
         if (mounted) {
+          clearTimeout(timeoutId);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+        if (mounted) {
+          clearTimeout(timeoutId);
           setLoading(false);
         }
       }
     };
 
-    checkSession();
+    initializeAuth();
 
+    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
 
         console.log('Auth state change:', event, session?.user?.email);
         
-        if (event === 'SIGNED_IN' && session?.user) {
-          await loadUserProfile(session.user.email!, session.user.id);
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
+        try {
+          if (event === 'SIGNED_IN' && session?.user) {
+            await loadUserProfile(session.user.email!, session.user.id);
+          } else if (event === 'SIGNED_OUT') {
+            setUser(null);
+          }
+        } catch (error) {
+          console.error('Auth state change error:', error);
         }
-        setLoading(false);
+        
+        if (mounted) {
+          setLoading(false);
+        }
       }
     );
 
     return () => {
       mounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       subscription.unsubscribe();
     };
   }, []);
 
   const loadUserProfile = async (email: string, authId: string) => {
     try {
-      // Try to get user from users table
+      console.log('Loading user profile for:', email);
+      
+      // For admin user, create a simple profile without database query
+      if (email === 'mudhirabu@gmail.com') {
+        setUser({
+          id: authId,
+          name: 'Admin User',
+          email: email,
+          role: 'admin',
+          avatar: '/avatar.png',
+        });
+        return;
+      }
+
+      // For other users, try to load from database
       const { data: userData, error } = await supabase
         .from('users')
         .select('*')
         .eq('email', email)
-        .single();
+        .maybeSingle();
 
-      if (!error && userData) {
+      if (userData) {
         setUser({
           id: userData.id,
           name: userData.username || 'User',
@@ -82,43 +131,36 @@ export function UserProvider({ children }: { children: ReactNode }) {
           role: userData.role,
           avatar: '/avatar.png',
         });
-      } else if (error?.code === 'PGRST116') {
-        // User doesn't exist, create one
-        await createUserProfile(email, authId);
-      } else {
-        console.error('Error fetching user data:', error);
-      }
-    } catch (err) {
-      console.error('Error loading user profile:', err);
-    }
-  };
-
-  const createUserProfile = async (email: string, authId: string) => {
-    try {
-      const role = email === 'mudhirabu@gmail.com' ? 'admin' : 'viewer';
-      
-      const { data, error } = await supabase
-        .from('users')
-        .insert({
-          id: authId,
-          username: email.split('@')[0],
-          email: email,
-          role: role
-        })
-        .select()
-        .single();
-
-      if (!error && data) {
+      } else if (!error || error.code === 'PGRST116') {
+        // User doesn't exist, create a simple profile
         setUser({
-          id: data.id,
-          name: data.username,
-          email: data.email,
-          role: data.role,
+          id: authId,
+          name: email.split('@')[0],
+          email: email,
+          role: 'viewer',
+          avatar: '/avatar.png',
+        });
+      } else {
+        console.error('Error loading user profile:', error);
+        // Still set a basic user profile to prevent blocking
+        setUser({
+          id: authId,
+          name: email.split('@')[0],
+          email: email,
+          role: 'viewer',
           avatar: '/avatar.png',
         });
       }
     } catch (err) {
-      console.error('Error creating user profile:', err);
+      console.error('Error in loadUserProfile:', err);
+      // Set a basic user profile to prevent blocking
+      setUser({
+        id: authId,
+        name: email.split('@')[0],
+        email: email,
+        role: email === 'mudhirabu@gmail.com' ? 'admin' : 'viewer',
+        avatar: '/avatar.png',
+      });
     }
   };
 
