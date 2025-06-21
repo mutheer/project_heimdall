@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Server, Activity, AlertCircle, Check, Copy, Code, Settings, RefreshCw, X, Plus, Clock, AlertTriangle, Shield, Database, Link } from 'lucide-react';
+import { Server, Activity, AlertCircle, Check, Copy, Code, Settings, RefreshCw, X, Plus, Clock, AlertTriangle, Shield, Database, Link, Download, FileText, Bell } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 
@@ -23,12 +23,23 @@ interface SystemLog {
   timestamp?: string;
 }
 
+interface ThreatAlert {
+  id: string;
+  system_name: string;
+  event_type: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  description: string;
+  timestamp: string;
+  details: any;
+}
+
 const ExternalSystems: React.FC = () => {
   const [systems, setSystems] = useState<ExternalSystem[]>([]);
-  const [selectedTab, setSelectedTab] = useState<'overview' | 'documentation' | 'activity'>('overview');
+  const [selectedTab, setSelectedTab] = useState<'overview' | 'documentation' | 'activity' | 'reports' | 'alerts'>('overview');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [systemLogs, setSystemLogs] = useState<SystemLog[]>([]);
+  const [threatAlerts, setThreatAlerts] = useState<ThreatAlert[]>([]);
   const [selectedSystem, setSelectedSystem] = useState<string | null>(null);
   const [syncingSystemIds, setSyncingSystemIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +69,8 @@ const ExternalSystems: React.FC = () => {
       } else {
         fetchAllExternalSystemLogs();
       }
+    } else if (selectedTab === 'alerts') {
+      fetchThreatAlerts();
     }
   }, [selectedTab, selectedSystem]);
 
@@ -119,6 +132,9 @@ const ExternalSystems: React.FC = () => {
 
       setSystemLogs(transformedLogs);
       
+      // Analyze logs for threats
+      await analyzeThreatPatterns(transformedLogs, system);
+      
       if (transformedLogs.length === 0) {
         console.log('No logs found in external system');
       }
@@ -171,6 +187,9 @@ const ExternalSystems: React.FC = () => {
 
           allLogs.push(...transformedLogs);
           console.log(`Fetched ${transformedLogs.length} logs from ${system.name}`);
+          
+          // Analyze logs for threats
+          await analyzeThreatPatterns(transformedLogs, system);
         } catch (systemError) {
           console.warn(`Error fetching logs from ${system.name}:`, systemError);
           continue;
@@ -190,6 +209,273 @@ const ExternalSystems: React.FC = () => {
     } finally {
       setLogsLoading(false);
     }
+  };
+
+  const analyzeThreatPatterns = async (logs: SystemLog[], system: ExternalSystem) => {
+    const threats: ThreatAlert[] = [];
+    
+    logs.forEach(log => {
+      const eventType = log.event_type.toLowerCase();
+      const details = log.details || {};
+      
+      // Detect suspicious login attempts
+      if (eventType.includes('login') || eventType.includes('signin')) {
+        // Multiple failed login attempts
+        if (details.success === false || eventType.includes('failed')) {
+          threats.push({
+            id: `threat-${log.id}`,
+            system_name: system.name,
+            event_type: 'Suspicious Login Attempt',
+            severity: 'high',
+            description: `Failed login attempt detected from ${details.ip_address || 'unknown IP'}`,
+            timestamp: log.created_at,
+            details: log.details
+          });
+        }
+        
+        // Login from unusual location or IP
+        if (details.ip_address && !isKnownIP(details.ip_address)) {
+          threats.push({
+            id: `threat-geo-${log.id}`,
+            system_name: system.name,
+            event_type: 'Unusual Access Location',
+            severity: 'medium',
+            description: `Login from unusual IP address: ${details.ip_address}`,
+            timestamp: log.created_at,
+            details: log.details
+          });
+        }
+      }
+      
+      // Detect privilege escalation attempts
+      if (eventType.includes('admin') || eventType.includes('privilege') || eventType.includes('role')) {
+        threats.push({
+          id: `threat-priv-${log.id}`,
+          system_name: system.name,
+          event_type: 'Privilege Escalation Attempt',
+          severity: 'critical',
+          description: `Potential privilege escalation detected: ${log.event_type}`,
+          timestamp: log.created_at,
+          details: log.details
+        });
+      }
+      
+      // Detect data access patterns
+      if (eventType.includes('select') || eventType.includes('query') || eventType.includes('export')) {
+        const userAgent = details.user_agent || '';
+        if (userAgent.includes('bot') || userAgent.includes('crawler') || userAgent.includes('script')) {
+          threats.push({
+            id: `threat-bot-${log.id}`,
+            system_name: system.name,
+            event_type: 'Automated Data Access',
+            severity: 'medium',
+            description: `Automated access detected from: ${userAgent}`,
+            timestamp: log.created_at,
+            details: log.details
+          });
+        }
+      }
+      
+      // Detect unusual time access
+      const logTime = new Date(log.created_at);
+      const hour = logTime.getHours();
+      if (hour < 6 || hour > 22) { // Outside business hours
+        threats.push({
+          id: `threat-time-${log.id}`,
+          system_name: system.name,
+          event_type: 'Off-Hours Access',
+          severity: 'low',
+          description: `System access detected outside business hours at ${logTime.toLocaleTimeString()}`,
+          timestamp: log.created_at,
+          details: log.details
+        });
+      }
+    });
+    
+    // Store threats in database for persistence
+    if (threats.length > 0) {
+      await storeThreatAlerts(threats);
+    }
+  };
+
+  const isKnownIP = (ip: string): boolean => {
+    // Simple IP whitelist - in production, this would be more sophisticated
+    const knownIPs = ['127.0.0.1', '::1', '192.168.', '10.0.', '172.16.'];
+    return knownIPs.some(knownIP => ip.startsWith(knownIP));
+  };
+
+  const storeThreatAlerts = async (threats: ThreatAlert[]) => {
+    try {
+      // Store in threats table
+      const threatRecords = threats.map(threat => ({
+        threat_type: threat.event_type,
+        description: threat.description,
+        severity_level: threat.severity,
+        timestamp: threat.timestamp,
+        is_resolved: false,
+        device_id: null // External system threats don't have device_id
+      }));
+
+      const { error } = await supabase
+        .from('threats')
+        .insert(threatRecords);
+
+      if (error) {
+        console.error('Error storing threat alerts:', error);
+      } else {
+        console.log(`Stored ${threats.length} threat alerts`);
+      }
+    } catch (err) {
+      console.error('Error storing threat alerts:', err);
+    }
+  };
+
+  const fetchThreatAlerts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('threats')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+
+      const alerts: ThreatAlert[] = (data || []).map(threat => ({
+        id: threat.threat_id,
+        system_name: 'External System',
+        event_type: threat.threat_type,
+        severity: threat.severity_level as 'low' | 'medium' | 'high' | 'critical',
+        description: threat.description,
+        timestamp: threat.timestamp,
+        details: {}
+      }));
+
+      setThreatAlerts(alerts);
+    } catch (err) {
+      console.error('Error fetching threat alerts:', err);
+    }
+  };
+
+  const downloadSystemLogsReport = async () => {
+    try {
+      const reportData = {
+        title: 'External Systems Activity Report',
+        generated_at: new Date().toISOString(),
+        systems: systems.map(system => ({
+          name: system.name,
+          type: system.type,
+          status: system.status,
+          last_sync: system.last_sync
+        })),
+        logs: systemLogs.map(log => ({
+          event_type: log.event_type,
+          timestamp: log.created_at,
+          user_id: log.user_id,
+          details: log.details
+        })),
+        summary: {
+          total_systems: systems.length,
+          active_systems: systems.filter(s => s.status === 'active').length,
+          total_logs: systemLogs.length,
+          unique_events: [...new Set(systemLogs.map(l => l.event_type))].length
+        }
+      };
+
+      // Create CSV content
+      const csvContent = generateCSVReport(reportData);
+      
+      // Download CSV file
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `external-systems-logs-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      // Also store in database
+      await supabase.from('reports').insert({
+        report_data: reportData,
+        export_format: 'csv'
+      });
+
+    } catch (err) {
+      console.error('Error generating report:', err);
+      setError('Failed to generate report');
+    }
+  };
+
+  const downloadThreatAlertsReport = async () => {
+    try {
+      const reportData = {
+        title: 'Threat Alerts Report',
+        generated_at: new Date().toISOString(),
+        alerts: threatAlerts,
+        summary: {
+          total_alerts: threatAlerts.length,
+          critical_alerts: threatAlerts.filter(a => a.severity === 'critical').length,
+          high_alerts: threatAlerts.filter(a => a.severity === 'high').length,
+          medium_alerts: threatAlerts.filter(a => a.severity === 'medium').length,
+          low_alerts: threatAlerts.filter(a => a.severity === 'low').length
+        }
+      };
+
+      // Create CSV content for threats
+      const csvContent = generateThreatCSVReport(reportData);
+      
+      // Download CSV file
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `threat-alerts-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+    } catch (err) {
+      console.error('Error generating threat report:', err);
+      setError('Failed to generate threat report');
+    }
+  };
+
+  const generateCSVReport = (data: any): string => {
+    const headers = ['Timestamp', 'Event Type', 'User ID', 'System', 'Details'];
+    const rows = data.logs.map((log: any) => [
+      log.timestamp,
+      log.event_type,
+      log.user_id || '',
+      (log as any).system_name || 'Unknown',
+      JSON.stringify(log.details).replace(/"/g, '""')
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((row: any[]) => row.map(field => `"${field}"`).join(','))
+    ].join('\n');
+
+    return csvContent;
+  };
+
+  const generateThreatCSVReport = (data: any): string => {
+    const headers = ['Timestamp', 'Event Type', 'Severity', 'System', 'Description'];
+    const rows = data.alerts.map((alert: ThreatAlert) => [
+      alert.timestamp,
+      alert.event_type,
+      alert.severity,
+      alert.system_name,
+      alert.description.replace(/"/g, '""')
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((row: any[]) => row.map(field => `"${field}"`).join(','))
+    ].join('\n');
+
+    return csvContent;
   };
 
   const testConnection = async () => {
@@ -356,6 +642,21 @@ const ExternalSystems: React.FC = () => {
         return 'bg-danger-100 text-danger-800';
       default:
         return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'critical':
+        return 'bg-danger-100 text-danger-800 border-danger-200';
+      case 'high':
+        return 'bg-warning-100 text-warning-800 border-warning-200';
+      case 'medium':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'low':
+        return 'bg-blue-100 text-blue-800 border-blue-200';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
@@ -687,6 +988,28 @@ const ExternalSystems: React.FC = () => {
             Activity Log
           </button>
           <button
+            onClick={() => setSelectedTab('alerts')}
+            className={`${
+              selectedTab === 'alerts'
+                ? 'border-primary-500 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
+          >
+            <Bell className="h-4 w-4 mr-1" />
+            Threat Alerts
+          </button>
+          <button
+            onClick={() => setSelectedTab('reports')}
+            className={`${
+              selectedTab === 'reports'
+                ? 'border-primary-500 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
+          >
+            <FileText className="h-4 w-4 mr-1" />
+            Reports
+          </button>
+          <button
             onClick={() => setSelectedTab('documentation')}
             className={`${
               selectedTab === 'documentation'
@@ -842,6 +1165,13 @@ const ExternalSystems: React.FC = () => {
                     <RefreshCw className={`h-4 w-4 mr-1 ${logsLoading ? 'animate-spin' : ''}`} />
                     Refresh
                   </button>
+                  <button
+                    onClick={downloadSystemLogsReport}
+                    className="flex items-center px-3 py-2 text-sm bg-success-600 text-white rounded-md hover:bg-success-700"
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Download Report
+                  </button>
                 </div>
               </div>
             </div>
@@ -911,6 +1241,133 @@ const ExternalSystems: React.FC = () => {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      ) : selectedTab === 'alerts' ? (
+        <div className="space-y-6">
+          <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+            <div className="p-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-medium text-gray-900 flex items-center">
+                  <Bell className="h-5 w-5 mr-2" />
+                  Threat Alerts
+                </h2>
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={fetchThreatAlerts}
+                    className="flex items-center px-3 py-2 text-sm bg-primary-600 text-white rounded-md hover:bg-primary-700"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-1" />
+                    Refresh
+                  </button>
+                  <button
+                    onClick={downloadThreatAlertsReport}
+                    className="flex items-center px-3 py-2 text-sm bg-danger-600 text-white rounded-md hover:bg-danger-700"
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Download Report
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="divide-y divide-gray-200">
+              {threatAlerts.length > 0 ? (
+                threatAlerts.map((alert) => (
+                  <div key={alert.id} className="p-4 hover:bg-gray-50">
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0">
+                        <AlertTriangle className={`h-5 w-5 ${
+                          alert.severity === 'critical' ? 'text-danger-500' :
+                          alert.severity === 'high' ? 'text-warning-500' :
+                          alert.severity === 'medium' ? 'text-yellow-500' :
+                          'text-blue-500'
+                        }`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <p className="text-sm font-medium text-gray-900">{alert.event_type}</p>
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${getSeverityColor(alert.severity)}`}>
+                              {alert.severity.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-500">
+                            <Clock className="h-4 w-4 mr-1" />
+                            {new Date(alert.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          System: {alert.system_name}
+                        </p>
+                        <div className="mt-1">
+                          <p className="text-sm text-gray-700">{alert.description}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="p-8 text-center text-gray-500">
+                  <Bell className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Threat Alerts</h3>
+                  <p className="text-sm text-gray-500">
+                    No security threats have been detected from external systems.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : selectedTab === 'reports' ? (
+        <div className="space-y-6">
+          <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+            <div className="p-6">
+              <h2 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                <FileText className="h-5 w-5 mr-2" />
+                System Reports
+              </h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="border border-gray-200 rounded-lg p-4">
+                  <h3 className="text-base font-medium text-gray-900 mb-2">Activity Logs Report</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Download a comprehensive report of all system activity logs from connected external systems.
+                  </p>
+                  <button
+                    onClick={downloadSystemLogsReport}
+                    className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download CSV Report
+                  </button>
+                </div>
+
+                <div className="border border-gray-200 rounded-lg p-4">
+                  <h3 className="text-base font-medium text-gray-900 mb-2">Threat Alerts Report</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Download a detailed report of all detected security threats and alerts.
+                  </p>
+                  <button
+                    onClick={downloadThreatAlertsReport}
+                    className="flex items-center px-4 py-2 bg-danger-600 text-white rounded-md hover:bg-danger-700"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download CSV Report
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                <h4 className="text-sm font-medium text-blue-900 mb-2">📊 Report Contents</h4>
+                <ul className="text-sm text-blue-700 space-y-1">
+                  <li><strong>Activity Logs:</strong> Event types, timestamps, user IDs, system details, and event metadata</li>
+                  <li><strong>Threat Alerts:</strong> Threat types, severity levels, descriptions, affected systems, and detection timestamps</li>
+                  <li><strong>Format:</strong> CSV files compatible with Excel, Google Sheets, and data analysis tools</li>
+                  <li><strong>Data Range:</strong> All available data from connected external systems</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
@@ -996,7 +1453,21 @@ USING (true);`}</code>
                   <li>Query the system_logs table in real-time</li>
                   <li>Display logs without storing them locally</li>
                   <li>Validate connection and table structure</li>
+                  <li>Analyze logs for security threats and suspicious activities</li>
+                  <li>Generate alerts for potential security incidents</li>
                 </ol>
+
+                <h4 className="text-sm font-medium text-gray-900 mt-6">🚨 Threat Detection</h4>
+                <p className="text-gray-600 mb-4">
+                  The system automatically analyzes logs for:
+                </p>
+                <ul className="list-disc list-inside text-gray-600 mb-4 space-y-1">
+                  <li><strong>Failed Login Attempts:</strong> Multiple failed authentication attempts</li>
+                  <li><strong>Unusual Access Patterns:</strong> Logins from unknown IP addresses or locations</li>
+                  <li><strong>Privilege Escalation:</strong> Attempts to gain administrative access</li>
+                  <li><strong>Automated Access:</strong> Bot or script-based system access</li>
+                  <li><strong>Off-Hours Activity:</strong> System access outside business hours</li>
+                </ul>
 
                 <h4 className="text-sm font-medium text-gray-900 mt-6">🚨 Troubleshooting</h4>
                 <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
