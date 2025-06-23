@@ -55,7 +55,7 @@ const Login: React.FC = () => {
 
   useEffect(() => {
     // Initial greeting
-    addMessageWithTypingEffect("Hello! I'm your AI assistant HeimdallAI. please enter your email to log in");
+    addMessageWithTypingEffect("Hello! I'm your heimdall AI assistant for this system. please enter your email to log in or do you want to add an analyst?");
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
