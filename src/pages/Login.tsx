@@ -237,7 +237,7 @@ const Login: React.FC = () => {
                 {mode === 'login' ? (
                   <>
                     <UserPlus className="h-4 w-4 mr-2" />
-                    Create Account
+                    Create Analyst Account
                   </>
                 ) : (
                   <>
