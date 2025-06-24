@@ -402,6 +402,26 @@ class ApiService {
         console.error('API Error - alerts.getAll:', error);
         throw error;
       }
+    },
+
+    getRecent: async (limit: number = 20): Promise<Alert[]> => {
+      try {
+        const { data, error } = await supabase
+          .from('alerts')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(limit);
+
+        if (error) {
+          console.error('Error fetching recent alerts:', error);
+          throw new Error(`Failed to fetch recent alerts: ${error.message}`);
+        }
+
+        return data || [];
+      } catch (error) {
+        console.error('API Error - alerts.getRecent:', error);
+        throw error;
+      }
     }
   };
 
