@@ -176,10 +176,12 @@ const Login: React.FC = () => {
             if (success) {
               console.log('✅ Login successful, redirecting...');
               await addMessageWithTypingEffect("🎉 Login successful! Welcome back to Heimdall AI. Redirecting you to the dashboard...");
+              
+              // Wait a bit longer to ensure user state is set
               setTimeout(() => {
                 console.log('🔄 Navigating to:', from);
                 navigate(from, { replace: true });
-              }, 500);
+              }, 1500);
             } else {
               console.log('❌ Login failed');
               await addMessageWithTypingEffect("❌ Login failed. The credentials don't seem to be correct. Let's try again - what would you like to do?");

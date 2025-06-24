@@ -36,7 +36,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
         if (session?.user) {
           console.log('✅ Found existing session for:', session.user.email);
-          await loadUserProfile(session.user.email!);
+          await loadUserProfile(session.user.email!, session.user.id);
         } else {
           console.log('ℹ️ No existing session found');
         }
@@ -54,7 +54,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         
         if (event === 'SIGNED_IN' && session?.user) {
           console.log('✅ User signed in, loading profile...');
-          await loadUserProfile(session.user.email!);
+          await loadUserProfile(session.user.email!, session.user.id);
         } else if (event === 'SIGNED_OUT') {
           console.log('👋 User signed out');
           setUser(null);
@@ -67,28 +67,79 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const loadUserProfile = async (email: string) => {
+  const createUserProfile = async (email: string, userId: string, username?: string, role?: string) => {
     try {
-      console.log('📋 Loading user profile for:', email);
+      console.log('📝 Creating user profile for:', email);
       
-      const { data: userData, error } = await supabase
+      // Determine role - check if this is an admin email
+      const userRole = email === 'mudhirabu@gmail.com' || email === 'muthirabu@gmail.com' ? 'admin' : (role || 'viewer');
+      
+      const { data, error } = await supabase
         .from('users')
-        .select('id, username, email, role') // Only select essential columns
+        .insert([
+          {
+            id: userId,
+            username: username || email.split('@')[0],
+            email: email,
+            role: userRole,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Error creating user profile:', error);
+        throw error;
+      }
+
+      console.log('✅ User profile created successfully:', data);
+      return data;
+    } catch (err) {
+      console.error('❌ Exception in createUserProfile:', err);
+      throw err;
+    }
+  };
+
+  const loadUserProfile = async (email: string, userId: string) => {
+    try {
+      console.log('📋 Loading user profile for:', email, 'with ID:', userId);
+      
+      // First try to get the user profile
+      let { data: userData, error } = await supabase
+        .from('users')
+        .select('id, username, email, role')
         .eq('email', email)
         .single();
 
       if (error) {
-        console.error('❌ Error fetching user data:', error);
-        console.error('Error details:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
+        console.warn('⚠️ User profile not found, attempting to create:', error.message);
         
-        // Explicitly set user to null if profile loading fails
-        setUser(null);
-        return;
+        // If user doesn't exist, try to create it
+        if (error.code === 'PGRST116') { // No rows returned
+          try {
+            userData = await createUserProfile(email, userId);
+          } catch (createError) {
+            console.error('❌ Failed to create user profile:', createError);
+            
+            // If creation fails, create a temporary user object
+            console.log('🔄 Creating temporary user object');
+            const tempUser = {
+              id: userId,
+              name: email.split('@')[0],
+              email: email,
+              role: (email === 'mudhirabu@gmail.com' || email === 'muthirabu@gmail.com') ? 'admin' as const : 'viewer' as const,
+              avatar: '/avatar.png',
+            };
+            setUser(tempUser);
+            return;
+          }
+        } else {
+          console.error('❌ Database error loading user profile:', error);
+          setUser(null);
+          return;
+        }
       }
 
       if (!userData) {
@@ -113,7 +164,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
       });
     } catch (err) {
       console.error('❌ Exception in loadUserProfile:', err);
-      setUser(null);
+      
+      // Create fallback user for admin emails
+      if (email === 'mudhirabu@gmail.com' || email === 'muthirabu@gmail.com') {
+        console.log('🔄 Creating fallback admin user');
+        setUser({
+          id: userId,
+          name: 'Admin User',
+          email: email,
+          role: 'admin',
+          avatar: '/avatar.png',
+        });
+      } else {
+        setUser(null);
+      }
     }
   };
 
@@ -147,8 +211,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
         console.log('User ID:', authData.user.id);
         console.log('Email confirmed:', authData.user.email_confirmed_at ? 'Yes' : 'No');
         
-        // The trigger will handle creating the user profile
-        // If email confirmation is disabled, the user will be signed in automatically
+        // Try to create user profile immediately
+        if (authData.user.email_confirmed_at) {
+          await createUserProfile(email, authData.user.id, username, role);
+        }
+        
         return true;
       }
 
