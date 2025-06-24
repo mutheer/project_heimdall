@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ShieldCheck, UserPlus, Send, Bot, User } from 'lucide-react';
 import { useUser } from '../context/UserContext';
@@ -19,10 +19,38 @@ const Login: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'login' | 'signup' | 'chat'>('chat');
   const [step, setStep] = useState<'intent' | 'email' | 'password' | 'username'>('intent');
-  const { login, signup } = useUser();
+  const { login, signup, isAuthenticated, loading: authLoading, error: authError } = useUser();
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
+  
+  // Prevent duplicate initialization
+  const initializedRef = useRef(false);
+  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Handle authentication success - redirect when user is authenticated
+  useEffect(() => {
+    if (isAuthenticated && !authLoading) {
+      console.log('✅ User authenticated, redirecting to:', from);
+      
+      // Clear any existing timeout
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
+      }
+      
+      // Navigate immediately
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, authLoading, navigate, from]);
+
+  // Handle authentication errors
+  useEffect(() => {
+    if (authError && !authLoading) {
+      console.error('❌ Authentication error:', authError);
+      addMessageWithTypingEffect(`❌ Authentication error: ${authError}. Please try again.`);
+      resetToChat();
+    }
+  }, [authError, authLoading]);
 
   const addMessageWithTypingEffect = async (content: string, role: 'assistant' | 'user' = 'assistant', action?: 'login' | 'signup' | 'help') => {
     const message: Message = { role, content, isTyping: role === 'assistant', action };
@@ -33,7 +61,7 @@ const Login: React.FC = () => {
       let currentText = '';
       
       for (let i = 0; i < words.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 5)); // Reduced from 20ms to 5ms
+        await new Promise(resolve => setTimeout(resolve, 5)); // Fast typing
         currentText += (i > 0 ? ' ' : '') + words[i];
         setMessages(prev => 
           prev.map((msg, index) => 
@@ -124,12 +152,15 @@ const Login: React.FC = () => {
     }
   };
 
+  // Initialize chat only once
   useEffect(() => {
-    // Initial greeting
-    addMessageWithTypingEffect(
-      "👋 Hello! I'm your Heimdall AI assistant. I can help you log into the system or create new analyst accounts.\n\nWhat would you like to do today?"
-    );
-  }, []);
+    if (!initializedRef.current && !isAuthenticated) {
+      initializedRef.current = true;
+      addMessageWithTypingEffect(
+        "👋 Hello! I'm your Heimdall AI assistant. I can help you log into the system or create new analyst accounts.\n\nWhat would you like to do today?"
+      );
+    }
+  }, [isAuthenticated]);
 
   const resetToChat = () => {
     console.log('🔄 Resetting to chat mode');
@@ -142,7 +173,7 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (currentInput.trim() === '') return;
+    if (currentInput.trim() === '' || isLoading || authLoading) return;
 
     await addMessageWithTypingEffect(currentInput, 'user');
     setIsLoading(true);
@@ -174,23 +205,14 @@ const Login: React.FC = () => {
             const success = await login(email, currentInput);
             
             if (success) {
-              console.log('✅ Login successful, redirecting...');
+              console.log('✅ Login successful');
               await addMessageWithTypingEffect("🎉 Login successful! Welcome back to Heimdall AI. Redirecting you to the dashboard...");
-              
-              // Wait a bit longer to ensure user state is set
-              setTimeout(() => {
-                console.log('🔄 Navigating to:', from);
-                navigate(from, { replace: true });
-              }, 1500);
-            } else {
-              console.log('❌ Login failed');
-              await addMessageWithTypingEffect("❌ Login failed. The credentials don't seem to be correct. Let's try again - what would you like to do?");
-              resetToChat();
+              // Navigation will be handled by the useEffect above
             }
           } catch (error) {
-            console.error('❌ Login error:', error);
+            console.error('❌ Login failed:', error);
             const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-            await addMessageWithTypingEffect(`❌ Login error: ${errorMessage}. Let's start over - what would you like to do?`);
+            await addMessageWithTypingEffect(`❌ Login failed: ${errorMessage}. Let's try again - what would you like to do?`);
             resetToChat();
           }
         } else {
@@ -207,13 +229,9 @@ const Login: React.FC = () => {
                 resetToChat();
                 addMessageWithTypingEffect("Is there anything else I can help you with today?");
               }, 1000);
-            } else {
-              console.log('❌ Signup failed');
-              await addMessageWithTypingEffect("❌ Account creation failed. Let's try again - what would you like to do?");
-              resetToChat();
             }
           } catch (error) {
-            console.error('❌ Signup error:', error);
+            console.error('❌ Signup failed:', error);
             const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
             await addMessageWithTypingEffect(`❌ Error creating account: ${errorMessage}. Let's start over - how can I help you?`);
             resetToChat();
@@ -242,10 +260,12 @@ const Login: React.FC = () => {
   const getInputType = () => {
     if (step === 'password') return 'password';
     if (step === 'email') return 'email';
-    return 'text'; // Use text for intent recognition and username
+    return 'text';
   };
 
   const handleQuickAction = async (action: string) => {
+    if (isLoading || authLoading) return;
+    
     setCurrentInput(action);
     await addMessageWithTypingEffect(action, 'user');
     setIsLoading(true);
@@ -253,6 +273,18 @@ const Login: React.FC = () => {
     setCurrentInput('');
     setIsLoading(false);
   };
+
+  // Show loading state while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
@@ -324,13 +356,13 @@ const Login: React.FC = () => {
                 onChange={(e) => setCurrentInput(e.target.value)}
                 className="appearance-none block w-full px-3 py-3 pr-12 border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                 placeholder={getPlaceholder()}
-                disabled={isLoading}
+                disabled={isLoading || authLoading}
               />
               <button
                 type="submit"
-                disabled={isLoading || currentInput.trim() === ''}
+                disabled={isLoading || authLoading || currentInput.trim() === ''}
                 className={`absolute right-2 top-1/2 transform -translate-y-1/2 p-2 rounded-md ${
-                  isLoading || currentInput.trim() === ''
+                  isLoading || authLoading || currentInput.trim() === ''
                     ? 'text-gray-400 cursor-not-allowed'
                     : 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
                 }`}
@@ -345,7 +377,7 @@ const Login: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleQuickAction('I want to login')}
-                  disabled={isLoading}
+                  disabled={isLoading || authLoading}
                   className="flex-1 flex items-center justify-center py-2 px-3 border border-gray-300 rounded-md shadow-sm text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                 >
                   <ShieldCheck className="h-3 w-3 mr-1" />
@@ -354,7 +386,7 @@ const Login: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleQuickAction('Add new analyst')}
-                  disabled={isLoading}
+                  disabled={isLoading || authLoading}
                   className="flex-1 flex items-center justify-center py-2 px-3 border border-gray-300 rounded-md shadow-sm text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                 >
                   <UserPlus className="h-3 w-3 mr-1" />

@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
+import React, { createContext, useState, useContext, ReactNode, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 interface User {
@@ -15,112 +15,173 @@ interface UserContextType {
   signup: (email: string, password: string, username?: string, role?: string) => Promise<boolean>;
   logout: () => void;
   isAuthenticated: boolean;
+  loading: boolean;
+  error: string | null;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  // Use refs to prevent duplicate auth state listeners and profile loads
+  const authListenerRef = useRef<any>(null);
+  const profileLoadingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    // Check for existing session on mount
-    const checkSession = async () => {
+    // Only initialize once
+    if (isInitialized) return;
+    
+    const initializeAuth = async () => {
       try {
-        console.log('🔍 Checking existing session...');
-        const { data: { session }, error } = await supabase.auth.getSession();
+        console.log('🔍 Initializing authentication...');
         
-        if (error) {
-          console.error('❌ Session check error:', error);
+        // Check for existing session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ Session check error:', sessionError);
+          setError('Failed to check authentication status');
+          setLoading(false);
+          setIsInitialized(true);
           return;
         }
 
         if (session?.user) {
           console.log('✅ Found existing session for:', session.user.email);
-          await loadUserProfile(session.user.email!, session.user.id);
+          await loadUserProfile(session.user.id, session.user.email!);
         } else {
           console.log('ℹ️ No existing session found');
+          setLoading(false);
         }
+
+        // Set up auth state listener (only once)
+        if (!authListenerRef.current) {
+          const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            async (event, session) => {
+              console.log('🔄 Auth state change:', event, session?.user?.email);
+              
+              if (event === 'SIGNED_IN' && session?.user) {
+                console.log('✅ User signed in, loading profile...');
+                await loadUserProfile(session.user.id, session.user.email!);
+              } else if (event === 'SIGNED_OUT') {
+                console.log('👋 User signed out');
+                setUser(null);
+                setError(null);
+                setLoading(false);
+                // Clear any pending profile loads
+                profileLoadingRef.current.clear();
+              } else if (event === 'TOKEN_REFRESHED') {
+                console.log('🔄 Token refreshed');
+                // Don't reload profile on token refresh if user already exists
+                if (!user && session?.user) {
+                  await loadUserProfile(session.user.id, session.user.email!);
+                }
+              }
+            }
+          );
+          
+          authListenerRef.current = subscription;
+        }
+
+        setIsInitialized(true);
       } catch (error) {
-        console.error('❌ Session check exception:', error);
+        console.error('❌ Auth initialization error:', error);
+        setError('Failed to initialize authentication');
+        setLoading(false);
+        setIsInitialized(true);
       }
     };
 
-    checkSession();
+    initializeAuth();
 
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('🔄 Auth state change:', event, session?.user?.email);
-        
-        if (event === 'SIGNED_IN' && session?.user) {
-          console.log('✅ User signed in, loading profile...');
-          await loadUserProfile(session.user.email!, session.user.id);
-        } else if (event === 'SIGNED_OUT') {
-          console.log('👋 User signed out');
-          setUser(null);
-        } else if (event === 'TOKEN_REFRESHED') {
-          console.log('🔄 Token refreshed');
-        }
+    // Cleanup function
+    return () => {
+      if (authListenerRef.current) {
+        authListenerRef.current.unsubscribe();
+        authListenerRef.current = null;
       }
-    );
+    };
+  }, [isInitialized]); // Only depend on isInitialized
 
-    return () => subscription.unsubscribe();
-  }, []);
+  const loadUserProfile = async (userId: string, email: string) => {
+    // Prevent duplicate profile loads for the same user
+    const profileKey = `${userId}-${email}`;
+    if (profileLoadingRef.current.has(profileKey)) {
+      console.log('🔄 Profile already loading for:', email);
+      return;
+    }
 
-  const loadUserProfile = async (email: string, userId: string) => {
+    profileLoadingRef.current.add(profileKey);
+    
     try {
-      console.log('📋 Loading user profile for:', email, 'with ID:', userId);
+      console.log('📋 Loading user profile for ID:', userId, 'Email:', email);
       
-      // Get the user profile from the database
+      // Use ID-based lookup instead of email to avoid case sensitivity issues
       const { data: userData, error } = await supabase
         .from('users')
         .select('id, username, email, role')
-        .eq('email', email)
+        .eq('id', userId)
         .single();
 
       if (error) {
-        console.warn('⚠️ User profile not found:', error.message);
+        console.warn('⚠️ User profile not found by ID, trying email:', error.message);
         
-        // If user doesn't exist, the handle_new_user trigger should have created it
-        // Wait a moment and try again
-        if (error.code === 'PGRST116') { // No rows returned
-          console.log('🔄 Waiting for trigger to create user profile...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        // Fallback to email lookup if ID lookup fails
+        const { data: emailUserData, error: emailError } = await supabase
+          .from('users')
+          .select('id, username, email, role')
+          .eq('email', email)
+          .single();
+
+        if (emailError) {
+          console.error('❌ User profile not found by email either:', emailError);
           
-          // Try again
-          const { data: retryUserData, error: retryError } = await supabase
-            .from('users')
-            .select('id, username, email, role')
-            .eq('email', email)
-            .single();
-            
-          if (retryError) {
-            console.error('❌ User profile still not found after retry:', retryError);
-            setUser(null);
-            return;
+          // Check if this is an RLS issue (no error but no data)
+          if (emailError.code === 'PGRST116') {
+            console.warn('🔒 Possible RLS blocking profile read - user may not have permission');
+            setError('Unable to load user profile. Please check permissions.');
+          } else {
+            console.error('💾 Database error loading user profile:', emailError);
+            setError('Database error loading profile');
           }
           
-          // Use retry data
-          if (retryUserData) {
-            setUser({
-              id: retryUserData.id,
-              name: retryUserData.username || 'User',
-              email: retryUserData.email,
-              role: retryUserData.role,
-              avatar: '/avatar.png',
-            });
-            return;
-          }
+          setUser(null);
+          setLoading(false);
+          return;
         }
-        
-        console.error('❌ Database error loading user profile:', error);
-        setUser(null);
-        return;
+
+        // Use email lookup result
+        if (emailUserData) {
+          console.log('✅ User profile loaded via email fallback:', {
+            id: emailUserData.id,
+            email: emailUserData.email,
+            role: emailUserData.role,
+            username: emailUserData.username
+          });
+
+          setUser({
+            id: emailUserData.id,
+            name: emailUserData.username || 'User',
+            email: emailUserData.email,
+            role: emailUserData.role,
+            avatar: '/avatar.png',
+          });
+          setError(null);
+          setLoading(false);
+          return;
+        }
       }
 
       if (!userData) {
-        console.warn('⚠️ No user data found for email:', email);
+        console.warn('⚠️ No user data found for ID:', userId, 'Email:', email);
+        console.warn('🔒 This might be an RLS policy issue - check if user has permission to read their profile');
+        setError('User profile not found. This may be a permissions issue.');
         setUser(null);
+        setLoading(false);
         return;
       }
 
@@ -138,15 +199,24 @@ export function UserProvider({ children }: { children: ReactNode }) {
         role: userData.role,
         avatar: '/avatar.png',
       });
+      setError(null);
+      setLoading(false);
     } catch (err) {
       console.error('❌ Exception in loadUserProfile:', err);
+      setError('Failed to load user profile');
       setUser(null);
+      setLoading(false);
+    } finally {
+      // Always remove from loading set
+      profileLoadingRef.current.delete(profileKey);
     }
   };
 
   const signup = async (email: string, password: string, username?: string, role: string = 'viewer'): Promise<boolean> => {
     try {
       console.log('📝 Starting signup process for:', email);
+      setError(null);
+      setLoading(true);
 
       // Sign up with Supabase Auth - the handle_new_user trigger will create the profile
       const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -162,10 +232,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
       if (authError) {
         console.error('❌ Auth signup error:', authError);
-        console.error('Auth error details:', {
-          code: authError.code,
-          message: authError.message
-        });
+        setError(authError.message);
+        setLoading(false);
         throw new Error(authError.message);
       }
 
@@ -175,15 +243,18 @@ export function UserProvider({ children }: { children: ReactNode }) {
         console.log('Email confirmed:', authData.user.email_confirmed_at ? 'Yes' : 'No');
         
         // The handle_new_user trigger will automatically create the user profile
-        // No need to call createUserProfile manually
+        // The auth state change listener will handle loading the profile
         
         return true;
       }
 
       console.error('❌ Signup failed: No user returned');
+      setError('Signup failed: No user returned');
+      setLoading(false);
       throw new Error('Signup failed: No user returned');
     } catch (err) {
       console.error('❌ Signup exception:', err);
+      setLoading(false);
       throw err;
     }
   };
@@ -191,7 +262,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       console.log('🔐 Starting login process for:', email);
-      console.log('Login attempt timestamp:', new Date().toISOString());
+      setError(null);
+      setLoading(true);
 
       // Use Supabase's standard authentication flow
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -201,63 +273,27 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
       if (authError) {
         console.error('❌ Auth sign-in error:', authError);
-        console.error('Auth error details:', {
-          code: authError.code,
-          message: authError.message,
-          status: authError.status
-        });
-        
-        // Log specific error types
-        if (authError.message.includes('Invalid login credentials')) {
-          console.error('🔑 Invalid credentials provided');
-        } else if (authError.message.includes('Email not confirmed')) {
-          console.error('📧 Email not confirmed');
-        } else if (authError.message.includes('Too many requests')) {
-          console.error('⏰ Rate limited');
-        }
-        
+        setError('Invalid login credentials');
+        setLoading(false);
         throw new Error('Invalid login credentials');
       }
 
       if (!authData.user) {
         console.error('❌ Authentication failed: No user returned');
+        setError('Authentication failed');
+        setLoading(false);
         throw new Error('Authentication failed: No user returned');
       }
 
       console.log('✅ Auth sign-in successful for:', authData.user.email);
-      console.log('User details:', {
-        id: authData.user.id,
-        email: authData.user.email,
-        emailConfirmed: authData.user.email_confirmed_at ? 'Yes' : 'No',
-        lastSignIn: authData.user.last_sign_in_at
-      });
-
-      if (authData.session) {
-        console.log('✅ Session created successfully');
-        console.log('Session details:', {
-          accessToken: authData.session.access_token ? 'Present' : 'Missing',
-          refreshToken: authData.session.refresh_token ? 'Present' : 'Missing',
-          expiresAt: authData.session.expires_at,
-          expiresIn: authData.session.expires_in
-        });
-      } else {
-        console.warn('⚠️ No session created');
-      }
-
+      
       // The onAuthStateChange listener will handle setting the user state
       console.log('🔄 Waiting for auth state change to trigger profile loading...');
-      
-      // Add a small delay to ensure the auth state change is processed
-      await new Promise(resolve => setTimeout(resolve, 100));
       
       return true;
     } catch (err) {
       console.error('❌ Login exception:', err);
-      console.error('Exception details:', {
-        name: err instanceof Error ? err.name : 'Unknown',
-        message: err instanceof Error ? err.message : 'Unknown error',
-        stack: err instanceof Error ? err.stack : 'No stack trace'
-      });
+      setLoading(false);
       throw err;
     }
   };
@@ -265,36 +301,58 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     try {
       console.log('👋 Starting logout process...');
+      setLoading(true);
       
       const { error } = await supabase.auth.signOut();
       
       if (error) {
         console.error('❌ Logout error:', error);
+        setError('Logout failed');
       } else {
         console.log('✅ Logout successful');
       }
       
       // Force logout even if there's an error
       setUser(null);
+      setError(null);
+      setLoading(false);
+      profileLoadingRef.current.clear();
     } catch (error) {
       console.error('❌ Logout exception:', error);
       // Force logout even if there's an error
       setUser(null);
+      setError(null);
+      setLoading(false);
+      profileLoadingRef.current.clear();
     }
   };
 
-  // Add debugging for user state changes
+  // Add debugging for user state changes (but prevent re-renders)
   useEffect(() => {
-    console.log('👤 User state changed:', user ? {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      name: user.name
-    } : 'null');
-  }, [user]);
+    if (user) {
+      console.log('👤 User state updated:', {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name
+      });
+    } else {
+      console.log('👤 User state cleared');
+    }
+  }, [user?.id, user?.email, user?.role]); // Only log when essential fields change
+
+  const contextValue = {
+    user,
+    login,
+    signup,
+    logout,
+    isAuthenticated: !!user,
+    loading,
+    error
+  };
 
   return (
-    <UserContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user }}>
+    <UserContext.Provider value={contextValue}>
       {children}
     </UserContext.Provider>
   );
