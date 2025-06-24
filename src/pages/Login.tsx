@@ -131,6 +131,15 @@ const Login: React.FC = () => {
     );
   }, []);
 
+  const resetToChat = () => {
+    console.log('🔄 Resetting to chat mode');
+    setMode('chat');
+    setStep('intent');
+    setEmail('');
+    setPassword('');
+    setUsername('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (currentInput.trim() === '') return;
@@ -159,52 +168,65 @@ const Login: React.FC = () => {
         
         if (mode === 'login') {
           try {
+            console.log('🔐 Attempting login with email:', email);
+            await addMessageWithTypingEffect("🔄 Authenticating your credentials...");
+            
             const success = await login(email, currentInput);
+            
             if (success) {
+              console.log('✅ Login successful, redirecting...');
               await addMessageWithTypingEffect("🎉 Login successful! Welcome back to Heimdall AI. Redirecting you to the dashboard...");
-              setTimeout(() => navigate(from, { replace: true }), 500); // Reduced from 1500ms to 500ms
+              setTimeout(() => {
+                console.log('🔄 Navigating to:', from);
+                navigate(from, { replace: true });
+              }, 500);
             } else {
+              console.log('❌ Login failed');
               await addMessageWithTypingEffect("❌ Login failed. The credentials don't seem to be correct. Let's try again - what would you like to do?");
               resetToChat();
             }
           } catch (error) {
-            await addMessageWithTypingEffect("❌ Login error occurred. Let's start over - what would you like to do?");
+            console.error('❌ Login error:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+            await addMessageWithTypingEffect(`❌ Login error: ${errorMessage}. Let's start over - what would you like to do?`);
             resetToChat();
           }
         } else {
           try {
+            console.log('📝 Attempting signup with email:', email);
+            await addMessageWithTypingEffect("🔄 Creating your analyst account...");
+            
             const success = await signup(email, currentInput, username, 'analyst');
+            
             if (success) {
+              console.log('✅ Signup successful');
               await addMessageWithTypingEffect("🎉 Analyst account created successfully! The new user can now access the system with their credentials.");
               setTimeout(() => {
                 resetToChat();
                 addMessageWithTypingEffect("Is there anything else I can help you with today?");
-              }, 1000); // Reduced from 2000ms
+              }, 1000);
             } else {
+              console.log('❌ Signup failed');
               await addMessageWithTypingEffect("❌ Account creation failed. Let's try again - what would you like to do?");
               resetToChat();
             }
           } catch (error) {
-            await addMessageWithTypingEffect("❌ Error creating account. Let's start over - how can I help you?");
+            console.error('❌ Signup error:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+            await addMessageWithTypingEffect(`❌ Error creating account: ${errorMessage}. Let's start over - how can I help you?`);
             resetToChat();
           }
         }
       }
     } catch (err) {
-      await addMessageWithTypingEffect("❌ Something went wrong. Let's start fresh - what would you like to do?");
+      console.error('❌ Form submission error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      await addMessageWithTypingEffect(`❌ Something went wrong: ${errorMessage}. Let's start fresh - what would you like to do?`);
       resetToChat();
     }
 
     setCurrentInput('');
     setIsLoading(false);
-  };
-
-  const resetToChat = () => {
-    setMode('chat');
-    setStep('intent');
-    setEmail('');
-    setPassword('');
-    setUsername('');
   };
 
   const getPlaceholder = () => {
