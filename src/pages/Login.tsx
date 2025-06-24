@@ -18,7 +18,7 @@ const Login: React.FC = () => {
   const [username, setUsername] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'login' | 'signup' | 'chat'>('chat');
-  const [step, setStep] = useState<'email' | 'password' | 'username'>('email');
+  const [step, setStep] = useState<'intent' | 'email' | 'password' | 'username'>('intent');
   const { login, signup } = useUser();
   const navigate = useNavigate();
   const location = useLocation();
@@ -89,7 +89,7 @@ const Login: React.FC = () => {
     switch (intent) {
       case 'login':
         await addMessageWithTypingEffect(
-          "I understand you want to log in! I'll help you access your account. Please provide your email address to get started.",
+          "Perfect! I understand you want to log in to access your account. Please provide your email address to get started.",
           'assistant',
           'login'
         );
@@ -139,7 +139,7 @@ const Login: React.FC = () => {
     setIsLoading(true);
 
     try {
-      if (mode === 'chat') {
+      if (step === 'intent') {
         await handleAIResponse(currentInput);
       } else if (step === 'email') {
         setEmail(currentInput);
@@ -164,7 +164,7 @@ const Login: React.FC = () => {
               await addMessageWithTypingEffect("🎉 Login successful! Welcome back to Heimdall AI. Redirecting you to the dashboard...");
               setTimeout(() => navigate(from, { replace: true }), 1500);
             } else {
-              await addMessageWithTypingEffect("❌ Login failed. The credentials don't seem to be correct. Let's try again - please provide your email address.");
+              await addMessageWithTypingEffect("❌ Login failed. The credentials don't seem to be correct. Let's try again - what would you like to do?");
               resetToChat();
             }
           } catch (error) {
@@ -201,14 +201,14 @@ const Login: React.FC = () => {
 
   const resetToChat = () => {
     setMode('chat');
-    setStep('email');
+    setStep('intent');
     setEmail('');
     setPassword('');
     setUsername('');
   };
 
   const getPlaceholder = () => {
-    if (mode === 'chat') return "Type your message... (e.g., 'I want to login' or 'Add new analyst')";
+    if (step === 'intent') return "Type your message... (e.g., 'I want to login' or 'Add new analyst')";
     if (step === 'email') return "Enter email address";
     if (step === 'username') return "Enter username for the analyst";
     if (step === 'password') return mode === 'signup' ? "Create a secure password" : "Enter your password";
@@ -218,7 +218,16 @@ const Login: React.FC = () => {
   const getInputType = () => {
     if (step === 'password') return 'password';
     if (step === 'email') return 'email';
-    return 'text';
+    return 'text'; // Use text for intent recognition and username
+  };
+
+  const handleQuickAction = async (action: string) => {
+    setCurrentInput(action);
+    await addMessageWithTypingEffect(action, 'user');
+    setIsLoading(true);
+    await handleAIResponse(action);
+    setCurrentInput('');
+    setIsLoading(false);
   };
 
   return (
@@ -307,26 +316,22 @@ const Login: React.FC = () => {
             </div>
 
             {/* Quick Action Buttons */}
-            {mode === 'chat' && (
+            {step === 'intent' && (
               <div className="flex space-x-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setCurrentInput('I want to login');
-                    handleSubmit(new Event('submit') as any);
-                  }}
-                  className="flex-1 flex items-center justify-center py-2 px-3 border border-gray-300 rounded-md shadow-sm text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  onClick={() => handleQuickAction('I want to login')}
+                  disabled={isLoading}
+                  className="flex-1 flex items-center justify-center py-2 px-3 border border-gray-300 rounded-md shadow-sm text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                 >
                   <ShieldCheck className="h-3 w-3 mr-1" />
                   Quick Login
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setCurrentInput('Add new analyst');
-                    handleSubmit(new Event('submit') as any);
-                  }}
-                  className="flex-1 flex items-center justify-center py-2 px-3 border border-gray-300 rounded-md shadow-sm text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  onClick={() => handleQuickAction('Add new analyst')}
+                  disabled={isLoading}
+                  className="flex-1 flex items-center justify-center py-2 px-3 border border-gray-300 rounded-md shadow-sm text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                 >
                   <UserPlus className="h-3 w-3 mr-1" />
                   Add Analyst
@@ -336,7 +341,7 @@ const Login: React.FC = () => {
           </form>
 
           {/* Default Credentials Info */}
-          {mode === 'login' && (
+          {mode === 'login' && step !== 'intent' && (
             <div className="mt-6">
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
