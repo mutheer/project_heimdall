@@ -3,7 +3,7 @@ import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, Cartesia
 import { ShieldAlert, ShieldCheck, Cpu, AlertTriangle, Activity, Shield, Database, RefreshCw } from 'lucide-react';
 import ThreatCard from '../components/ThreatCard';
 import DeviceStatusCard from '../components/DeviceStatusCard';
-import DatabaseStatus Afrom '../components/DatabaseStatus';
+import DatabaseStatus from '../components/DatabaseStatus';
 import { api, Device, Threat } from '../services/api';
 
 const Dashboard: React.FC = () => {
