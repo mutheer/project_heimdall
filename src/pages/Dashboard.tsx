@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { ShieldAlert, ShieldCheck, Cpu, AlertTriangle, Activity, Shield, Database } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, Cpu, AlertTriangle, Activity, Shield, Database, RefreshCw } from 'lucide-react';
 import ThreatCard from '../components/ThreatCard';
 import DeviceStatusCard from '../components/DeviceStatusCard';
 import DatabaseStatus from '../components/DatabaseStatus';
@@ -12,25 +12,62 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDatabaseStatus, setShowDatabaseStatus] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [devicesData, threatsData] = await Promise.all([
-          api.devices.getAll(),
-          api.threats.getAll()
-        ]);
-        
-        setDevices(devicesData);
-        setThreats(threatsData);
-      } catch (err) {
-        setError('Failed to fetch data');
-        console.error(err);
-      } finally {
+  const fetchData = async (isRetry = false) => {
+    try {
+      if (!isRetry) {
+        setLoading(true);
+      }
+      setError(null);
+
+      console.log('Fetching dashboard data...');
+      
+      // Test connection first
+      const healthCheck = await api.healthCheck();
+      console.log('Health check result:', healthCheck);
+
+      if (healthCheck.status !== 'healthy') {
+        throw new Error('Database connection is not healthy');
+      }
+
+      const [devicesData, threatsData] = await Promise.all([
+        api.devices.getAll(),
+        api.threats.getAll()
+      ]);
+      
+      console.log('Fetched devices:', devicesData.length);
+      console.log('Fetched threats:', threatsData.length);
+      
+      setDevices(devicesData);
+      setThreats(threatsData);
+      setRetryCount(0); // Reset retry count on success
+    } catch (err) {
+      console.error('Dashboard fetch error:', err);
+      
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch data';
+      setError(errorMessage);
+      
+      // Auto-retry logic for network errors
+      if (retryCount < 3 && (
+        errorMessage.includes('Failed to fetch') || 
+        errorMessage.includes('Network') ||
+        errorMessage.includes('connection')
+      )) {
+        console.log(`Retrying in 2 seconds... (attempt ${retryCount + 1}/3)`);
+        setTimeout(() => {
+          setRetryCount(prev => prev + 1);
+          fetchData(true);
+        }, 2000);
+      }
+    } finally {
+      if (!isRetry) {
         setLoading(false);
       }
-    };
+    }
+  };
 
+  useEffect(() => {
     fetchData();
   }, []);
 
@@ -95,7 +132,15 @@ const Dashboard: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-gray-500">Loading...</div>
+        <div className="flex flex-col items-center space-y-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+          <div className="text-gray-500">Loading dashboard data...</div>
+          {retryCount > 0 && (
+            <div className="text-sm text-gray-400">
+              Retrying... (attempt {retryCount}/3)
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -103,7 +148,25 @@ const Dashboard: React.FC = () => {
   if (error) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-danger-500">{error}</div>
+        <div className="text-center space-y-4">
+          <div className="text-danger-500 font-medium">Connection Error</div>
+          <div className="text-gray-600 max-w-md">{error}</div>
+          <button
+            onClick={() => fetchData()}
+            className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors mx-auto"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry Connection
+          </button>
+          <div className="text-sm text-gray-500 mt-4">
+            <p>Troubleshooting tips:</p>
+            <ul className="text-left mt-2 space-y-1">
+              <li>• Check your internet connection</li>
+              <li>• Verify Supabase project is active</li>
+              <li>• Confirm environment variables are correct</li>
+            </ul>
+          </div>
+        </div>
       </div>
     );
   }
@@ -119,6 +182,13 @@ const Dashboard: React.FC = () => {
           >
             <Database className="h-4 w-4 mr-2" />
             Database Status
+          </button>
+          <button
+            onClick={() => fetchData()}
+            className="flex items-center px-3 py-2 text-sm bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
           </button>
           <div className="text-sm text-gray-500">Last updated: {new Date().toLocaleString()}</div>
         </div>
@@ -151,74 +221,90 @@ const Dashboard: React.FC = () => {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Device Status</h2>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={deviceStatusData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {deviceStatusData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => [`${value} devices`, entry.name]} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex justify-center space-x-4 mt-2">
-            {deviceStatusData.map((entry, index) => (
-              <div key={index} className="flex items-center">
-                <span
-                  className="h-3 w-3 rounded-full mr-1"
-                  style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                ></span>
-                <span className="text-xs">{entry.name}</span>
+            {deviceStatusData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={deviceStatusData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {deviceStatusData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number, name: string) => [`${value} devices`, name]} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                No device data available
               </div>
-            ))}
+            )}
           </div>
+          {deviceStatusData.length > 0 && (
+            <div className="flex justify-center space-x-4 mt-2">
+              {deviceStatusData.map((entry, index) => (
+                <div key={index} className="flex items-center">
+                  <span
+                    className="h-3 w-3 rounded-full mr-1"
+                    style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                  ></span>
+                  <span className="text-xs">{entry.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Threat Type Distribution */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Threat Types</h2>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={threatTypeData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {threatTypeData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={THREAT_COLORS[index % THREAT_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => [`${value} threats`, entry.name]} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex flex-wrap justify-center gap-2 mt-2">
-            {threatTypeData.map((entry, index) => (
-              <div key={index} className="flex items-center">
-                <span
-                  className="h-3 w-3 rounded-full mr-1"
-                  style={{ backgroundColor: THREAT_COLORS[index % THREAT_COLORS.length] }}
-                ></span>
-                <span className="text-xs whitespace-nowrap">{entry.name}</span>
+            {threatTypeData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={threatTypeData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {threatTypeData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={THREAT_COLORS[index % THREAT_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number, name: string) => [`${value} threats`, name]} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                No threat data available
               </div>
-            ))}
+            )}
           </div>
+          {threatTypeData.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-2 mt-2">
+              {threatTypeData.map((entry, index) => (
+                <div key={index} className="flex items-center">
+                  <span
+                    className="h-3 w-3 rounded-full mr-1"
+                    style={{ backgroundColor: THREAT_COLORS[index % THREAT_COLORS.length] }}
+                  ></span>
+                  <span className="text-xs whitespace-nowrap">{entry.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -233,9 +319,15 @@ const Dashboard: React.FC = () => {
             </button>
           </div>
           <div className="space-y-4">
-            {threats.slice(0, 3).map((threat) => (
-              <ThreatCard key={threat.threat_id} threat={threat} />
-            ))}
+            {threats.length > 0 ? (
+              threats.slice(0, 3).map((threat) => (
+                <ThreatCard key={threat.threat_id} threat={threat} />
+              ))
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                No threats detected
+              </div>
+            )}
           </div>
         </div>
 
@@ -248,9 +340,15 @@ const Dashboard: React.FC = () => {
             </button>
           </div>
           <div className="space-y-4">
-            {devices.slice(0, 4).map((device) => (
-              <DeviceStatusCard key={device.device_id} device={device} />
-            ))}
+            {devices.length > 0 ? (
+              devices.slice(0, 4).map((device) => (
+                <DeviceStatusCard key={device.device_id} device={device} />
+              ))
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                No devices registered
+              </div>
+            )}
           </div>
         </div>
       </div>
