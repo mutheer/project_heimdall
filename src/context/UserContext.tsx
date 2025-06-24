@@ -67,79 +67,55 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const createUserProfile = async (email: string, userId: string, username?: string, role?: string) => {
-    try {
-      console.log('📝 Creating user profile for:', email);
-      
-      // Determine role - check if this is an admin email
-      const userRole = email === 'mudhirabu@gmail.com' || email === 'muthirabu@gmail.com' ? 'admin' : (role || 'viewer');
-      
-      const { data, error } = await supabase
-        .from('users')
-        .insert([
-          {
-            id: userId,
-            username: username || email.split('@')[0],
-            email: email,
-            role: userRole,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }
-        ])
-        .select()
-        .single();
-
-      if (error) {
-        console.error('❌ Error creating user profile:', error);
-        throw error;
-      }
-
-      console.log('✅ User profile created successfully:', data);
-      return data;
-    } catch (err) {
-      console.error('❌ Exception in createUserProfile:', err);
-      throw err;
-    }
-  };
-
   const loadUserProfile = async (email: string, userId: string) => {
     try {
       console.log('📋 Loading user profile for:', email, 'with ID:', userId);
       
-      // First try to get the user profile
-      let { data: userData, error } = await supabase
+      // Get the user profile from the database
+      const { data: userData, error } = await supabase
         .from('users')
         .select('id, username, email, role')
         .eq('email', email)
         .single();
 
       if (error) {
-        console.warn('⚠️ User profile not found, attempting to create:', error.message);
+        console.warn('⚠️ User profile not found:', error.message);
         
-        // If user doesn't exist, try to create it
+        // If user doesn't exist, the handle_new_user trigger should have created it
+        // Wait a moment and try again
         if (error.code === 'PGRST116') { // No rows returned
-          try {
-            userData = await createUserProfile(email, userId);
-          } catch (createError) {
-            console.error('❌ Failed to create user profile:', createError);
+          console.log('🔄 Waiting for trigger to create user profile...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Try again
+          const { data: retryUserData, error: retryError } = await supabase
+            .from('users')
+            .select('id, username, email, role')
+            .eq('email', email)
+            .single();
             
-            // If creation fails, create a temporary user object
-            console.log('🔄 Creating temporary user object');
-            const tempUser = {
-              id: userId,
-              name: email.split('@')[0],
-              email: email,
-              role: (email === 'mudhirabu@gmail.com' || email === 'muthirabu@gmail.com') ? 'admin' as const : 'viewer' as const,
-              avatar: '/avatar.png',
-            };
-            setUser(tempUser);
+          if (retryError) {
+            console.error('❌ User profile still not found after retry:', retryError);
+            setUser(null);
             return;
           }
-        } else {
-          console.error('❌ Database error loading user profile:', error);
-          setUser(null);
-          return;
+          
+          // Use retry data
+          if (retryUserData) {
+            setUser({
+              id: retryUserData.id,
+              name: retryUserData.username || 'User',
+              email: retryUserData.email,
+              role: retryUserData.role,
+              avatar: '/avatar.png',
+            });
+            return;
+          }
         }
+        
+        console.error('❌ Database error loading user profile:', error);
+        setUser(null);
+        return;
       }
 
       if (!userData) {
@@ -164,20 +140,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       });
     } catch (err) {
       console.error('❌ Exception in loadUserProfile:', err);
-      
-      // Create fallback user for admin emails
-      if (email === 'mudhirabu@gmail.com' || email === 'muthirabu@gmail.com') {
-        console.log('🔄 Creating fallback admin user');
-        setUser({
-          id: userId,
-          name: 'Admin User',
-          email: email,
-          role: 'admin',
-          avatar: '/avatar.png',
-        });
-      } else {
-        setUser(null);
-      }
+      setUser(null);
     }
   };
 
@@ -185,7 +148,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     try {
       console.log('📝 Starting signup process for:', email);
 
-      // Sign up with Supabase Auth
+      // Sign up with Supabase Auth - the handle_new_user trigger will create the profile
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email,
         password: password,
@@ -211,10 +174,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         console.log('User ID:', authData.user.id);
         console.log('Email confirmed:', authData.user.email_confirmed_at ? 'Yes' : 'No');
         
-        // Try to create user profile immediately
-        if (authData.user.email_confirmed_at) {
-          await createUserProfile(email, authData.user.id, username, role);
-        }
+        // The handle_new_user trigger will automatically create the user profile
+        // No need to call createUserProfile manually
         
         return true;
       }
