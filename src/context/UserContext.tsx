@@ -57,7 +57,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     try {
       const { data: userData, error } = await supabase
         .from('users')
-        .select('*')
+        .select('id, username, email, role') // Only select essential columns
         .eq('email', email)
         .single();
 

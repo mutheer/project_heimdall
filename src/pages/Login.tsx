@@ -29,12 +29,12 @@ const Login: React.FC = () => {
     setMessages(prev => [...prev, message]);
 
     if (role === 'assistant') {
-      const chars = content.split('');
+      const words = content.split(' ');
       let currentText = '';
       
-      for (let i = 0; i < chars.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 20));
-        currentText += chars[i];
+      for (let i = 0; i < words.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 5)); // Reduced from 20ms to 5ms
+        currentText += (i > 0 ? ' ' : '') + words[i];
         setMessages(prev => 
           prev.map((msg, index) => 
             index === prev.length - 1 
@@ -162,7 +162,7 @@ const Login: React.FC = () => {
             const success = await login(email, currentInput);
             if (success) {
               await addMessageWithTypingEffect("🎉 Login successful! Welcome back to Heimdall AI. Redirecting you to the dashboard...");
-              setTimeout(() => navigate(from, { replace: true }), 1500);
+              setTimeout(() => navigate(from, { replace: true }), 500); // Reduced from 1500ms to 500ms
             } else {
               await addMessageWithTypingEffect("❌ Login failed. The credentials don't seem to be correct. Let's try again - what would you like to do?");
               resetToChat();
@@ -179,7 +179,7 @@ const Login: React.FC = () => {
               setTimeout(() => {
                 resetToChat();
                 addMessageWithTypingEffect("Is there anything else I can help you with today?");
-              }, 2000);
+              }, 1000); // Reduced from 2000ms
             } else {
               await addMessageWithTypingEffect("❌ Account creation failed. Let's try again - what would you like to do?");
               resetToChat();
