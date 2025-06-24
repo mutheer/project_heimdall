@@ -37,6 +37,27 @@ export interface Report {
   created_at: string;
 }
 
+export interface SystemLog {
+  id: string;
+  system_id?: string;
+  event_type: string;
+  user_id?: string;
+  timestamp: string;
+  details: any;
+  created_at: string;
+}
+
+export interface ExternalSystem {
+  id: string;
+  name: string;
+  type: string;
+  url: string;
+  status: string;
+  description?: string;
+  last_sync: string;
+  created_at: string;
+}
+
 export const api = {
   devices: {
     getAll: async () => {
@@ -147,6 +168,121 @@ export const api = {
 
       if (error) throw error;
       return data[0] as Report;
+    },
+
+    downloadSystemLogs: async (systemId?: string, startDate?: string, endDate?: string) => {
+      let query = supabase
+        .from('system_logs')
+        .select('*, external_systems(name)')
+        .order('created_at', { ascending: false });
+
+      if (systemId) {
+        query = query.eq('system_id', systemId);
+      }
+
+      if (startDate) {
+        query = query.gte('created_at', startDate);
+      }
+
+      if (endDate) {
+        query = query.lte('created_at', endDate);
+      }
+
+      const { data, error } = await query;
+      
+      if (error) throw error;
+
+      // Convert to CSV format
+      const logs = data as (SystemLog & { external_systems?: { name: string } })[];
+      const csvHeaders = ['Timestamp', 'System', 'Event Type', 'User ID', 'Details'];
+      const csvRows = logs.map(log => [
+        new Date(log.created_at).toISOString(),
+        log.external_systems?.name || 'Unknown',
+        log.event_type,
+        log.user_id || '',
+        JSON.stringify(log.details)
+      ]);
+
+      const csvContent = [
+        csvHeaders.join(','),
+        ...csvRows.map(row => row.map(field => `"${field}"`).join(','))
+      ].join('\n');
+
+      // Create and download file
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `system-logs-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      return logs;
+    }
+  },
+
+  systemLogs: {
+    getAll: async (systemId?: string, limit: number = 100) => {
+      let query = supabase
+        .from('system_logs')
+        .select('*, external_systems(name)')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (systemId) {
+        query = query.eq('system_id', systemId);
+      }
+
+      const { data, error } = await query;
+      
+      if (error) throw error;
+      return data as (SystemLog & { external_systems?: { name: string } })[];
+    },
+
+    analyzeForThreats: async (logs: SystemLog[]) => {
+      // Analyze logs for suspicious patterns
+      const threats = [];
+      const suspiciousPatterns = [
+        { pattern: /failed.*login/i, severity: 'medium', type: 'Authentication Failure' },
+        { pattern: /unauthorized.*access/i, severity: 'high', type: 'Unauthorized Access' },
+        { pattern: /admin.*login/i, severity: 'medium', type: 'Admin Access' },
+        { pattern: /error.*database/i, severity: 'high', type: 'Database Error' },
+        { pattern: /connection.*refused/i, severity: 'medium', type: 'Connection Issue' },
+        { pattern: /timeout/i, severity: 'low', type: 'Timeout Event' }
+      ];
+
+      for (const log of logs) {
+        const logText = JSON.stringify(log.details).toLowerCase();
+        
+        for (const { pattern, severity, type } of suspiciousPatterns) {
+          if (pattern.test(logText)) {
+            threats.push({
+              log_id: log.id,
+              threat_type: type,
+              severity,
+              timestamp: log.created_at,
+              description: `Suspicious activity detected in ${log.event_type}: ${logText.substring(0, 100)}...`,
+              system_id: log.system_id
+            });
+          }
+        }
+      }
+
+      return threats;
+    }
+  },
+
+  externalSystems: {
+    getAll: async () => {
+      const { data, error } = await supabase
+        .from('external_systems')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data as ExternalSystem[];
     }
   }
 };
